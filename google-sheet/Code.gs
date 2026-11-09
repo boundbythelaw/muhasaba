@@ -299,7 +299,7 @@ function setManaged(date, verdict, url, summary) {
 
 /* ================================================================== journal store */
 
-const SCOLS = ["date", "entries", "shukr", "meta", "hash", "processedHash", "docId", "changedAt", "verdict", "title", "summary"];
+const SCOLS = ["date", "entries", "shukr", "meta", "hash", "processedHash", "docId", "changedAt", "verdict", "title", "summary", "error"];
 const S = (k) => SCOLS.indexOf(k) + 1;
 
 function storeSheet() {
@@ -376,6 +376,7 @@ function docInfo(dates) {
       title: o.title || "",
       summary: o.summary || "",
       pending: !!o.hash && o.hash !== o.processedHash,
+      error: String(o.error || ""),
     };
   });
   return out;
@@ -420,22 +421,28 @@ function processDay(date) {
 
   // The AI only sees entries with words; photo-only entries keep their place in the day.
   const forAI = entries.map((e, i) => ({ i: i, t: e.t, text: String(e.text || "") })).filter((e) => e.text.trim());
-  let ai = null;
-  try { ai = polishWithAI(forAI.map((e) => ({ t: e.t, text: e.text })), shukr, meta); } catch (err) { console.error("AI failed", err); }
+  let ai = null, aiError = "";
+  try { ai = polishWithAI(forAI.map((e) => ({ t: e.t, text: e.text })), shukr, meta); }
+  catch (err) { aiError = String(err && err.message ? err.message : err); console.error("AI failed", err); }
   const polished = entries.map((e) => ({ t: e.t, text: String(e.text || ""), photos: e.photos || [] }));
   if (ai && Array.isArray(ai.entries) && ai.entries.length === forAI.length) {
     forAI.forEach((f, k) => { const x = ai.entries[k]; if (x && String(x.text || "").trim()) polished[f.i].text = String(x.text); });
   }
-  const verdict = ai && VERDICT[ai.verdict] ? ai.verdict : "";
-  const title = (ai && ai.title) || "";
-  const summary = (ai && ai.summary) || "";
+  // If the AI call failed, keep the previous rating and summary instead of wiping them, and try again later.
+  const keepOld = !ai && !!aiError;
+  const verdict = ai && VERDICT[ai.verdict] ? ai.verdict : keepOld ? String(o.verdict || "") : "";
+  const title = ai ? ai.title || "" : keepOld ? String(o.title || "") : "";
+  const summary = ai ? ai.summary || "" : keepOld ? String(o.summary || "") : "";
   const shukrOut = (ai && ai.shukr) || shukr;
 
+  MEDIA_ERRORS.length = 0;
   const docId = writeDoc(o.docId, date, meta, entries, polished, shukr, shukrOut, verdict, title, summary, !!ai);
-  sh.getRange(r, S("processedHash")).setValue(o.hash);
+  const problems = [aiError && "AI polish failed: " + aiError.slice(0, 200)].concat(MEDIA_ERRORS.slice(0, 2)).filter(Boolean).join(" · ");
+  if (!keepOld) sh.getRange(r, S("processedHash")).setValue(o.hash); // a failed AI call stays pending, so it retries
   sh.getRange(r, S("docId")).setValue(docId);
-  sh.getRange(r, S("verdict"), 1, 3).setValues([[verdict, title, summary]]);
+  sh.getRange(r, S("verdict"), 1, 4).setValues([[verdict, title, summary, problems]]);
   setManaged(date, verdict, `https://docs.google.com/document/d/${docId}/edit`, title ? `${title}. ${summary}` : summary);
+  if (problems) console.warn(date, problems);
   return docId;
 }
 
@@ -489,7 +496,7 @@ function polishWithAI(entries, shukr, meta) {
     const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
       method: "post", contentType: "application/json", muteHttpExceptions: true,
       headers: { "x-api-key": p.getProperty("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01" },
-      payload: JSON.stringify({ model: p.getProperty("CLAUDE_MODEL") || "claude-haiku-5-5", max_tokens: 4000, messages: [{ role: "user", content: prompt }] }),
+      payload: JSON.stringify({ model: p.getProperty("CLAUDE_MODEL") || "claude-haiku-5-5", max_tokens: 16000, messages: [{ role: "user", content: prompt }] }),
     });
     if (res.getResponseCode() !== 200) throw new Error("Claude " + res.getResponseCode() + ": " + res.getContentText().slice(0, 300));
     const j = JSON.parse(res.getContentText());
@@ -630,7 +637,11 @@ function writeDoc(docId, date, meta, original, polished, shukrRaw, shukrOut, ver
       p.setAttributes(base).setSpacingAfter(8);
       if (time) p.editAsText().setBold(0, time.length - 1, true).setForegroundColor(0, time.length - 1, "#B97A12").setFontFamily(0, time.length - 1, "Roboto");
       const media = (e.photos || []).map(mediaItem).filter(Boolean);
-      if (media.length) { p.setSpacingAfter(4); appendMedia(body, media, base); }
+      if (media.length) {
+        p.setSpacingAfter(4);
+        try { appendMedia(body, media, base); }
+        catch (err) { console.error("Photos in Doc failed", err); MEDIA_ERRORS.push("Photos couldn't be placed in the Doc: " + String(err && err.message || err).slice(0, 160)); }
+      }
     });
   }
   if (String(shukrOut || "").trim()) {
@@ -792,8 +803,12 @@ function mediaItem(x) {
 const PAGE_W = 500; // 8.5in page with 56pt margins
 const fmtDur = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 
+/** Problems met while placing photos in the Doc, reported back to the app. */
+const MEDIA_ERRORS = [];
+
 function mediaBlob(m) {
-  try { return DriveApp.getFileById(typeof m === "string" ? m : m.p).getBlob(); } catch (e) { console.warn("Media missing", m, e); return null; }
+  try { return DriveApp.getFileById(typeof m === "string" ? m : m.p).getBlob(); }
+  catch (e) { console.warn("Media missing", m, e); MEDIA_ERRORS.push("A photo couldn't be opened from Drive: " + String(e && e.message || e).slice(0, 120)); return null; }
 }
 
 const videoUrl = (m) => `https://drive.google.com/file/d/${m.v}/view`;

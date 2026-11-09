@@ -202,6 +202,7 @@ export default function JournalView() {
             <button className="linkbtn" onClick={() => setView("record")}>{tr("Connect your Google Sheet to get Docs →")}</button>
           )}
         </div>
+        {sheet.url && info?.error && !busy && <p className="note warnnote">⚠ {info.error}</p>}
         {sheet.url && info?.pending && !busy && <p className="note">{tr("You've written more since the last polish. It updates by itself 30 minutes after you stop writing, or tap Update.")}</p>}
       </motion.section>
 

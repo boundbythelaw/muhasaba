@@ -569,3 +569,4 @@ textarea[readonly] { opacity: .7; }
 .recq button small, .recnative small { font-size: 10px; font-weight: 500; opacity: .75; }
 .recq button.on { background: #fff; color: #111; }
 .recnative { background: rgb(0 0 0 / .5); backdrop-filter: blur(6px); color: #fff; }
+.warnnote { color: var(--warn); }

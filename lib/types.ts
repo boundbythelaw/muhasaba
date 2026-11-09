@@ -44,6 +44,8 @@ export interface DocInfo {
   title: string;
   summary: string;
   pending: boolean;
+  /** What went wrong at the last polish (AI or photos), if anything. */
+  error?: string;
 }
 
 export interface DayLog {
