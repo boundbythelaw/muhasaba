@@ -71,7 +71,7 @@ export function buildRow(date: string, days: Record<string, DayLog>, prefs: Pref
   return row;
 }
 
-type Reply = { ok: boolean; error?: string; days?: number; sheet?: string; saved?: number; blind?: boolean; ai?: string; processError?: string; drive?: string; next?: number; restart?: boolean; data?: string; mime?: string; docs?: Record<string, import("./types").DocInfo> };
+type Reply = { ok: boolean; error?: string; status?: number; days?: number; sheet?: string; saved?: number; blind?: boolean; ai?: string; processError?: string; drive?: string; next?: number; restart?: boolean; data?: string; mime?: string; docs?: Record<string, import("./types").DocInfo> };
 
 /**
  * POST as text/plain (a "simple" request, so the browser sends no preflight that Apps Script would reject).
@@ -83,7 +83,8 @@ export async function postToSheet(url: string, body: object, verify = false): Pr
   if (typeof navigator !== "undefined" && navigator.onLine === false) return { ok: false, error: "offline" };
   try {
     const r = await fetch(url.trim(), { method: "POST", body: payload, redirect: "follow" });
-    const j = (await r.json()) as Reply;
+    let j: Reply;
+    try { j = (await r.json()) as Reply; } catch { return { ok: false, error: verify ? "unreachable" : "Unexpected reply from the sheet", status: r.status }; }
     return j && typeof j.ok === "boolean" ? j : { ok: false, error: "Unexpected reply from the sheet" };
   } catch {
     if (verify) return { ok: false, error: "unreachable" };

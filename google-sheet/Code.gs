@@ -763,6 +763,23 @@ function videoPart(v) {
   throw new Error("Drive upload error " + code + ": " + res.getContentText().slice(0, 160));
 }
 
+/**
+ * Run this once from the editor (select testVideoUpload ▸ Exécuter) if videos won't upload.
+ * It sends a tiny test video to Drive the same way the app does, asks for any missing permission,
+ * and writes the result in the log. The test file is deleted afterwards.
+ */
+function testVideoUpload() {
+  const bytes = Utilities.newBlob("muhasaba video test").getBytes();
+  const id = "ptest" + Date.now().toString(36);
+  const base = { id: id, date: Utilities.formatDate(new Date(), "UTC", "yyyy-MM-dd"), mime: "video/mp4", total: bytes.length };
+  let r = videoPart(base);
+  console.log("Session opened:", JSON.stringify(r));
+  r = videoPart(Object.assign({}, base, { offset: r.next || 0, data: Utilities.base64Encode(bytes) }));
+  console.log("Upload result:", JSON.stringify(r));
+  if (r.drive) { DriveApp.getFileById(r.drive).setTrashed(true); console.log("✓ Video uploads work. Now publish a new version: Déployer → Gérer les déploiements → ✏️ → Nouvelle version."); }
+  return r;
+}
+
 /* ------------------------------------------------------------------ media in the Doc */
 
 /** A photo is its Drive id; a video is { v: video id, p: cover id, d: seconds }. */

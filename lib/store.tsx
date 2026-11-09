@@ -440,14 +440,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const mime = rec.blob.type || "video/mp4";
       const base = { id, date, mime, total };
       let res = await postToSheet(sh.url, { video: base }, true);
-      for (let guard = 0; guard < 400; guard++) {
-        if (!res.ok) { fail(res); return; }
+      if (!res.ok && res.error === "unreachable") {
+        fail({ ok: false, error: tr("Your Apps Script didn't answer for the video. Make sure the newest Code.gs is pasted, then Déployer → Gérer les déploiements → ✏️ → Nouvelle version. It retries by itself.") });
+        return;
+      }
+      // Pieces shrink on a weak connection (3 MB → 1 MB → 512 KB, all multiples of 256 KB as Drive requires).
+      let chunk = VIDEO_CHUNK;
+      let next = 0;
+      let misses = 0;
+      for (let guard = 0; guard < 2000; guard++) {
+        if (!res.ok) {
+          if (res.error === "offline" || misses >= 4) {
+            fail(res.error === "unreachable" ? { ok: false, error: tr("The video upload keeps getting cut off. It will continue by itself from {n}% when the connection is better.", { n: Math.round((next / total) * 100) }) } : res);
+            return;
+          }
+          misses++;
+          chunk = Math.max(512 * 1024, chunk / 2 >= 1024 * 1024 ? 1024 * 1024 : 512 * 1024);
+          res = await postToSheet(sh.url, { video: base }, true); // ask how far it got, then carry on
+          continue;
+        }
         if (res.drive) { setRef((p) => { p.drive = res.drive; }); done(); return; }
         if (typeof res.next !== "number") { fail({ ok: true }); return; }
-        const next = res.next;
+        next = res.next;
         setPhotoUp((u) => ({ ...u, progress: { ...u.progress, [id]: next / total } }));
-        const piece = rec.blob.slice(next, Math.min(total, next + VIDEO_CHUNK));
+        const piece = rec.blob.slice(next, Math.min(total, next + chunk));
         res = await postToSheet(sh.url, { video: { ...base, offset: next, data: await toBase64(piece) } }, true);
+        if (res.ok) misses = 0;
       }
       fail({ ok: false, error: "Upload stalled" });
     } finally {

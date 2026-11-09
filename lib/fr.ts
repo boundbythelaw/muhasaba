@@ -220,4 +220,6 @@ export const FR: Record<string, string> = {
   "Retake": "Refaire", "Use this video": "Garder cette vidéo", "Start recording": "Commencer à filmer", "Switch camera": "Changer de caméra",
   "Uploading… {n}%": "Envoi… {n} %", "Previous": "Précédent", "Next": "Suivant",
   "Remove a video from the {t} entry": "Retirer une vidéo de la note de {t}",
+  "Your Apps Script didn't answer for the video. Make sure the newest Code.gs is pasted, then Déployer → Gérer les déploiements → ✏️ → Nouvelle version. It retries by itself.": "Votre Apps Script n'a pas répondu pour la vidéo. Vérifiez que le dernier Code.gs est collé, puis Déployer → Gérer les déploiements → ✏️ → Nouvelle version. L'envoi se relance tout seul.",
+  "The video upload keeps getting cut off. It will continue by itself from {n}% when the connection is better.": "L'envoi de la vidéo est coupé. Il reprendra tout seul à {n} % quand la connexion sera meilleure.",
 };
