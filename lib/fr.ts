@@ -222,4 +222,5 @@ export const FR: Record<string, string> = {
   "Remove a video from the {t} entry": "Retirer une vidéo de la note de {t}",
   "Your Apps Script didn't answer for the video. Make sure the newest Code.gs is pasted, then Déployer → Gérer les déploiements → ✏️ → Nouvelle version. It retries by itself.": "Votre Apps Script n'a pas répondu pour la vidéo. Vérifiez que le dernier Code.gs est collé, puis Déployer → Gérer les déploiements → ✏️ → Nouvelle version. L'envoi se relance tout seul.",
   "The video upload keeps getting cut off. It will continue by itself from {n}% when the connection is better.": "L'envoi de la vidéo est coupé. Il reprendra tout seul à {n} % quand la connexion sera meilleure.",
+  "Full HD": "Full HD", "Data saver": "Économie de données", "MB/min": "Mo/min", "Quality": "Qualité", "Camera app": "Appareil photo", "best quality": "meilleure qualité",
 };

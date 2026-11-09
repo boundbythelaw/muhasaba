@@ -98,13 +98,24 @@ export function PhotoButtons({ date, count, onAdd, compact, disabled }: { date: 
 
 type RecState = "starting" | "live" | "rec" | "review" | "saving" | "error";
 
+/** Recording quality. "hd" keeps detail; "saver" keeps files small on mobile data. Remembered on this phone. */
+const QUALITY = {
+  hd: { w: 1920, h: 1080, bps: 10_000_000, label: "Full HD", mbMin: 75 },
+  saver: { w: 1280, h: 720, bps: 2_500_000, label: "Data saver", mbMin: 19 },
+} as const;
+type Quality = keyof typeof QUALITY;
+const QKEY = "muhasaba-video-quality";
+const loadQ = (): Quality => { try { return localStorage.getItem(QKEY) === "saver" ? "saver" : "hd"; } catch { return "hd"; } };
+
 /**
- * Records straight in the app at 720p, about 18 MB a minute, so videos stay light on mobile data
- * (the phone's camera app would make them 5–10× bigger).
+ * Records straight in the app, in Full HD by default (about 75 MB a minute) or in Data saver (about 19 MB).
+ * "Camera app" opens the phone's own camera instead, for its full original quality.
  */
 function VideoRecorder({ date, onClose, onDone }: { date: string; onClose: () => void; onDone: (r: PhotoRef) => void }) {
   const [state, setState] = useState<RecState>("starting");
   const [facing, setFacing] = useState<"environment" | "user">("environment");
+  const [quality, setQuality] = useState<Quality>(loadQ);
+  const native = useRef<HTMLInputElement>(null);
   const [secs, setSecs] = useState(0);
   const [err, setErr] = useState("");
   const [result, setResult] = useState<{ blob: Blob; url: string; secs: number } | null>(null);
@@ -116,13 +127,13 @@ function VideoRecorder({ date, onClose, onDone }: { date: string; onClose: () =>
 
   const stopStream = () => { stream.current?.getTracks().forEach((t) => t.stop()); stream.current = null; };
 
-  const open = useCallback(async (face: "environment" | "user") => {
+  const open = useCallback(async (face: "environment" | "user", q: Quality) => {
     stopStream();
     setState("starting");
     if (!navigator.mediaDevices?.getUserMedia || !recMime()) { setErr(tr("This browser can't record video. Use the Gallery button with a video from your camera app.")); setState("error"); return; }
     try {
       const s = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: face }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+        video: { facingMode: { ideal: face }, width: { ideal: QUALITY[q].w }, height: { ideal: QUALITY[q].h }, frameRate: { ideal: 30 } },
         audio: { echoCancellation: true, noiseSuppression: true },
       });
       stream.current = s;
@@ -136,9 +147,9 @@ function VideoRecorder({ date, onClose, onDone }: { date: string; onClose: () =>
   }, []);
 
   useEffect(() => {
-    void open(facing);
+    void open(facing, quality);
     return () => { stopStream(); if (tick.current) clearInterval(tick.current); };
-  }, [facing, open]);
+  }, [facing, quality, open]);
   useEffect(() => () => { if (result) URL.revokeObjectURL(result.url); }, [result]);
 
   const stop = useCallback(() => {
@@ -151,7 +162,7 @@ function VideoRecorder({ date, onClose, onDone }: { date: string; onClose: () =>
     if (!s) return;
     const mimeType = recMime();
     const chunks: Blob[] = [];
-    const r = new MediaRecorder(s, { mimeType, videoBitsPerSecond: 2_400_000, audioBitsPerSecond: 96_000 });
+    const r = new MediaRecorder(s, { mimeType, videoBitsPerSecond: QUALITY[quality].bps, audioBitsPerSecond: 128_000 });
     r.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     r.onstop = () => {
       const took = (Date.now() - started.current) / 1000;
@@ -173,7 +184,22 @@ function VideoRecorder({ date, onClose, onDone }: { date: string; onClose: () =>
     }, 250);
   };
 
-  const retake = () => { setResult(null); setSecs(0); void open(facing); };
+  const retake = () => { setResult(null); setSecs(0); void open(facing, quality); };
+  const pickQuality = (q: Quality) => { setQuality(q); try { localStorage.setItem(QKEY, q); } catch { /* ignore */ } haptic(6); };
+  // The phone's own camera app: best quality, untouched (bigger files).
+  const fromCameraApp = async (f: File | undefined) => {
+    if (!f) return;
+    stopStream();
+    setState("saving");
+    try {
+      onDone(await ingestVideo(f, date));
+      if (f.size > 40 * 1024 * 1024) toast(tr("Big video ({n} MB). It uploads in the background, piece by piece.", { n: mb(f.size) }));
+    } catch (e) {
+      const m = e instanceof Error ? e.message : "";
+      setErr(m === "bigvideo" ? tr("This video is over 300 MB. Trim it in your gallery first, or record it in Muhasaba.") : m || tr("Couldn't save the video."));
+      setState("error");
+    }
+  };
   const use = async () => {
     if (!result) return;
     setState("saving");
@@ -199,6 +225,19 @@ function VideoRecorder({ date, onClose, onDone }: { date: string; onClose: () =>
           <div className="rectime num"><i />{fmtDur(secs)} <span>/ {fmtDur(MAX_REC_SECONDS)}</span></div>
         )}
         {state === "rec" && <div className="recbar" style={{ width: `${(secs / MAX_REC_SECONDS) * 100}%` }} />}
+        {(state === "live" || state === "starting" || state === "error") && (
+          <div className="rectop">
+            <div className="recq" role="radiogroup" aria-label={tr("Quality")}>
+              {(Object.keys(QUALITY) as Quality[]).map((q) => (
+                <button key={q} role="radio" aria-checked={quality === q} className={quality === q ? "on" : ""} onClick={() => pickQuality(q)}>
+                  {tr(QUALITY[q].label)}<small>~{QUALITY[q].mbMin} {tr("MB/min")}</small>
+                </button>
+              ))}
+            </div>
+            <input ref={native} type="file" accept="video/*" capture="environment" hidden onChange={(e) => fromCameraApp(e.target.files?.[0])} />
+            <button className="recnative" onClick={() => native.current?.click()}>{tr("Camera app")}<small>{tr("best quality")}</small></button>
+          </div>
+        )}
       </div>
       <div className="recctl">
         {state === "review" || state === "saving" ? (

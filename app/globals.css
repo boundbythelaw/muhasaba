@@ -563,3 +563,9 @@ textarea[readonly] { opacity: .7; }
 .lbbar { flex-wrap: wrap; }
 .lbbar .lbinfo { flex-basis: 100%; order: -1; margin-bottom: 8px; }
 .lbbar .btn.danger { margin-left: auto; }
+.rectop { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.recq { display: flex; padding: 3px; border-radius: 14px; background: rgb(0 0 0 / .5); backdrop-filter: blur(6px); }
+.recq button, .recnative { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 11px; border: 0; border-radius: 11px; background: transparent; color: rgb(255 255 255 / .75); font: inherit; font-size: 13px; font-weight: 700; }
+.recq button small, .recnative small { font-size: 10px; font-weight: 500; opacity: .75; }
+.recq button.on { background: #fff; color: #111; }
+.recnative { background: rgb(0 0 0 / .5); backdrop-filter: blur(6px); color: #fff; }
