@@ -1,0 +1,9 @@
+// Cloudflare Workers: serve the static app that `npm run build` writes to ./out
+{
+  "name": "muhasaba",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./out",
+    "not_found_handling": "404-page"
+  }
+}
