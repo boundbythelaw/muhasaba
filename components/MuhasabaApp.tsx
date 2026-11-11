@@ -15,6 +15,7 @@ import SalahCard from "./SalahCard";
 import WalkCard from "./WalkCard";
 import BonusCard from "./BonusCard";
 import WorkCard from "./WorkCard";
+import CheckinCard, { CheckinNudge } from "./CheckinCard";
 
 function ShukrCard() {
   const { day, update, locked, requestUnlock, cur } = useStore();
@@ -57,7 +58,7 @@ function Shell() {
     );
   }
 
-  const jump = (p: Pillar | "journal") => {
+  const jump = (p: Pillar | "journal" | "c") => {
     if (p === "journal") { setView("journal"); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     const go = () => {
       const el = document.getElementById(`sec-${p}`);
@@ -90,6 +91,7 @@ function Shell() {
               <WorkCard />
               <WalkCard />
               <BonusCard />
+              <CheckinCard />
               <ShukrCard />
               <p className="foot">{tr("Swipe the top card or use ‹ › to move between days. Everything saves as you tap.")}</p>
             </>
@@ -103,6 +105,7 @@ function Shell() {
       <ConfirmHost />
       <UnlockSheet />
       <Welcome />
+      <CheckinNudge />
       <FxLayer />
     </div>
   );

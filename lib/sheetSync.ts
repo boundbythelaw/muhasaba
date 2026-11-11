@@ -1,6 +1,6 @@
-import { PRAYERS } from "./constants";
+import { PRAYERS, reasonOf } from "./constants";
 import { hijri, parseKey } from "./dates";
-import { fmt, portion, scoreDay } from "./scoring";
+import { checkinDone, excused, fmt, portion, revPages, scoreDay, sleepHours } from "./scoring";
 import { bonusList } from "./bonus";
 import type { DayLog, Prefs } from "./types";
 
@@ -10,6 +10,8 @@ export interface SheetState {
   pending: Record<string, number>;
   lastSync: number | null;
   sheetName?: string;
+  /** Column layout version last seen from the script; a change makes the app send every day again. */
+  schema?: number;
 }
 
 export const EMPTY_SHEET: SheetState = { url: "", pending: {}, lastSync: null };
@@ -66,12 +68,35 @@ export function buildRow(date: string, days: Record<string, DayLog>, prefs: Pref
   };
   for (const { id } of PRAYERS) {
     const v = d.prayers[id];
-    row[id] = v == null ? null : PRAYER_LABEL[v];
+    row[id] = excused(d.why[id]) ? "Excused" : v == null ? null : PRAYER_LABEL[v];
   }
+  // "Subh: Overslept · Asr: Travelling ✓" (✓ = excuse prayed properly)
+  row.reasons = PRAYERS.filter(({ id }) => d.why[id]).map(({ id, en }) => {
+    const w = d.why[id]!, r = reasonOf(w.r)!;
+    return `${en}: ${r.label}${r.excuse ? (excused(w) ? " ✓" : " (not prayed properly)") : ""}`;
+  }).join(" · ");
+  row.excused = PRAYERS.filter(({ id }) => excused(d.why[id])).length;
+  const c = d.checkin;
+  row.slept = c.slept;
+  row.woke = c.woke;
+  row.sleepH = sleepHours(c);
+  row.phone = c.phone == null ? null : (["None", "A bit", "A lot"] as const)[c.phone];
+  row.energy = c.energy;
+  row.mood = c.mood;
+  row.slip = c.slip;
+  row.tawbah = c.slip ? c.tawbah : false;
+  row.checkin = checkinDone(c);
+  row.revised = revPages(d.rev);
+  row.revRanges = d.rev.map((r) => (r.from === r.to ? `${r.from}` : `${r.from}–${r.to}`)).join(", ");
+  // Context for reminders and the weekly letter.
+  row.tz = prefs.prayerLoc.tz;
+  row.lang = prefs.lang;
+  row.name = prefs.name;
+  if (typeof location !== "undefined") row.app = location.origin;
   return row;
 }
 
-type Reply = { ok: boolean; error?: string; status?: number; days?: number; sheet?: string; saved?: number; blind?: boolean; ai?: string; processError?: string; drive?: string; next?: number; restart?: boolean; data?: string; mime?: string; docs?: Record<string, import("./types").DocInfo> };
+type Reply = { ok: boolean; schema?: number; error?: string; status?: number; days?: number; sheet?: string; saved?: number; blind?: boolean; ai?: string; processError?: string; drive?: string; next?: number; restart?: boolean; data?: string; mime?: string; docs?: Record<string, import("./types").DocInfo> };
 
 /**
  * POST as text/plain (a "simple" request, so the browser sends no preflight that Apps Script would reject).

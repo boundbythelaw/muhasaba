@@ -9,6 +9,10 @@
  * • Videos go to "Muhasaba Journal/Videos" (uploaded in pieces, so a weak connection can resume). The Doc shows
  *   a cover picture with a ▶ link that opens the video in Drive.
  *
+ * • An "Insights" tab rebuilt every night: weekdays, best/worst days, how you respond to bad days, what comes with
+ *   them (sleep, phone, slips…), salah per prayer, ḥifẓ pace, work, walking, months.
+ * • A reminder email at 22:00 when something is missing, and a weekly letter every Sunday evening.
+ *
  * Setup:
  *   1. Paste this file, save, pick `setup` and press Run. Allow access (Sheets, Docs, Drive, external requests).
  *   2. In the sheet: Muhasaba menu → Set AI key… and paste a Gemini key (free, aistudio.google.com/apikey)
@@ -39,6 +43,8 @@ const COLUMNS = [
   ["Asr", "asr", 112],
   ["Maghrib", "maghrib", 112],
   ["Isha", "isha", 112],
+  ["Why late / missed", "reasons", 220],
+  ["Excused", "excused", 66],
   ["Pages memorised", "pages", 84],
   ["Portion", "portion", 82],
   ["Minutes", "minutes", 70],
@@ -47,16 +53,34 @@ const COLUMNS = [
   ["1 juz", "juz", 56],
   ["Mulk (Subh)", "mulkSubh", 84],
   ["Mulk (Maghrib)", "mulkMaghrib", 100],
+  ["Revised pages", "revised", 70],
+  ["Revision", "revRanges", 120],
   ["Hours", "hours", 60],
   ["Topics", "topics", 200],
   ["What moved forward", "note", 280],
   ["Steps", "steps", 76],
+  ["Slept", "slept", 62],
+  ["Woke", "woke", 62],
+  ["Sleep (h)", "sleepH", 66],
+  ["Phone", "phone", 70],
+  ["Energy", "energy", 62],
+  ["Mood", "mood", 58],
+  ["Slipped", "slip", 66],
+  ["Tawbah", "tawbah", 66],
+  ["Check-in ✓", "checkin", 76],
   ["Bonus ✦", "bonus", 70],
   ["Bonus deeds", "bonusList", 220],
   ["Journal", "journal", 96],
   ["The day in a line", "summary", 300],
   ["Last update", "updated", 140],
 ];
+/** Bumped whenever COLUMNS change. The app re-sends every day when it sees a new number. */
+const SCHEMA = 2;
+const INSIGHTS = "Insights";
+/** Local hour (in the app's time zone) for the nightly reminder email, and the weekly letter on Sunday. */
+const REMIND_HOUR = 22;
+const LETTER_HOUR = 20;
+
 /** Columns the script fills itself; app updates must not wipe them. */
 const MANAGED = ["dayType", "journal", "summary"];
 const NCOL = COLUMNS.length;
@@ -68,7 +92,7 @@ function colLetter(n) {
 }
 const letter = (key) => colLetter(col(key));
 
-const PRAYER_LABELS = ["Before takbīr", "Mosque (late)", "No mosque"];
+const PRAYER_LABELS = ["Before takbīr", "Mosque (late)", "No mosque", "Excused"];
 const DIFFICULTY = ["Easy", "Normal", "Hard"];
 const VERDICT = {
   good: { label: "Good day", fill: "#D7F2E4", ink: "#146C4B", dot: "🟢" },
@@ -114,7 +138,7 @@ function doPost(e) {
     const sheet = ensureLog();
     if (!SpreadsheetApp.getActive().getSheetByName(DASH)) buildDashboard();
     if (body.ping) {
-      return json({ ok: true, app: "muhasaba", sheet: SpreadsheetApp.getActive().getName(), days: lastDataRow(sheet) - 1, ai: aiProvider() || "none" });
+      return json({ ok: true, app: "muhasaba", sheet: SpreadsheetApp.getActive().getName(), days: lastDataRow(sheet) - 1, ai: aiProvider() || "none", schema: SCHEMA });
     }
     if (body.repolish) {
       lock.releaseLock();
@@ -125,7 +149,8 @@ function doPost(e) {
     const saved = upsert(sheet, rows);
     rows.forEach(storeJournal);
     processDate = typeof body.process === "string" ? body.process : null;
-    reply = { ok: true, saved };
+    reply = { ok: true, saved, schema: SCHEMA };
+    rememberContext(rows);
   } catch (err) {
     return json({ ok: false, error: String(err && err.message ? err.message : err) });
   } finally {
@@ -488,19 +513,24 @@ function parseJson(text) {
 }
 
 function polishWithAI(entries, shukr, meta) {
+  if (!aiProvider()) return null;
+  return parseJson(callAI(buildPrompt(entries, shukr, meta), 16000));
+}
+
+/** Send one prompt to whichever AI key is set (Claude or Gemini) and return its text. */
+function callAI(prompt, maxTokens) {
   const provider = aiProvider();
-  if (!provider) return null;
-  const prompt = buildPrompt(entries, shukr, meta);
+  if (!provider) throw new Error("No AI key set (Muhasaba menu → Set AI key…)");
   const p = PropertiesService.getScriptProperties();
   if (provider === "claude") {
     const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
       method: "post", contentType: "application/json", muteHttpExceptions: true,
       headers: { "x-api-key": p.getProperty("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01" },
-      payload: JSON.stringify({ model: p.getProperty("CLAUDE_MODEL") || "claude-haiku-5-5", max_tokens: 16000, messages: [{ role: "user", content: prompt }] }),
+      payload: JSON.stringify({ model: p.getProperty("CLAUDE_MODEL") || "claude-haiku-5-5", max_tokens: maxTokens || 4000, messages: [{ role: "user", content: prompt }] }),
     });
     if (res.getResponseCode() !== 200) throw new Error("Claude " + res.getResponseCode() + ": " + res.getContentText().slice(0, 300));
     const j = JSON.parse(res.getContentText());
-    return parseJson((j.content || []).map((c) => c.text || "").join(""));
+    return (j.content || []).map((c) => c.text || "").join("");
   }
   const key = p.getProperty("GEMINI_API_KEY");
   const model = geminiModel(key);
@@ -514,7 +544,7 @@ function polishWithAI(entries, shukr, meta) {
   }
   const j = JSON.parse(res.getContentText());
   const parts = (((j.candidates || [])[0] || {}).content || {}).parts || [];
-  return parseJson(parts.map((x) => x.text || "").join(""));
+  return parts.map((x) => x.text || "").join("");
 }
 
 /* ------------------------------------------------------------------ voice notes (OpenAI speech-to-text) */
@@ -882,6 +912,10 @@ function setup() {
   videoFolder();
   ScriptApp.getProjectTriggers().filter((t) => t.getHandlerFunction() === "processJournals").forEach((t) => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger("processJournals").timeBased().everyMinutes(15).create();
+  // One hourly heartbeat: nightly reminder email, Insights refresh, Sunday weekly letter.
+  ScriptApp.getProjectTriggers().filter((t) => t.getHandlerFunction() === "tick").forEach((t) => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger("tick").timeBased().everyHours(1).create();
+  buildInsights();
   SpreadsheetApp.getActive().setActiveSheet(SpreadsheetApp.getActive().getSheetByName(DASH));
 }
 
@@ -892,6 +926,11 @@ function onOpen() {
     .addItem("Polish journals now", "processAllNow")
     .addItem("Polish all journals again", "repolishAllMenu")
     .addItem("Open journal folder", "showFolder")
+    .addSeparator()
+    .addItem("Refresh Insights now", "buildInsights")
+    .addItem("Write this week's letter now", "weeklyLetterMenu")
+    .addItem("Send me a test reminder email", "testReminder")
+    .addItem("Turn the nightly email on / off", "toggleReminder")
     .addSeparator()
     .addItem("Rebuild formatting & dashboard", "setup")
     .addToUi();
@@ -938,11 +977,24 @@ function ensureLog(force) {
   const width = Math.min(NCOL, sh.getMaxColumns());
   const headerOk = width === NCOL && sh.getRange(1, 1, 1, NCOL).getValues()[0].join("|") === COLUMNS.map((c) => c[0]).join("|");
   if (!fresh && !force && headerOk) return sh;
-  // Columns changed since an older version: clear old rows. The app keeps everything and sends it again.
+  // Columns changed since an older version: move every existing value to its column's new place (matched by
+  // header name), so nothing is lost. New columns start empty and fill in as the app re-sends the days.
   if (!fresh && !headerOk) {
     const f = sh.getFilter(); if (f) f.remove();
+    const oldW = sh.getLastColumn();
+    const last = lastDataRow(sh);
+    const oldHead = oldW ? sh.getRange(1, 1, 1, oldW).getValues()[0].map(String) : [];
+    let moved = [];
+    if (last > 1 && oldW) {
+      const rng = sh.getRange(2, 1, last - 1, oldW);
+      const vals = rng.getValues(), forms = rng.getFormulas();
+      const from = COLUMNS.map(([h]) => oldHead.indexOf(h));
+      moved = vals.map((row, r) => from.map((i) => (i < 0 ? "" : forms[r][i] || row[i])));
+    }
     sh.getRange(2, 1, sh.getMaxRows() - 1, sh.getMaxColumns()).clearContent().clearDataValidations();
     sh.getRange(1, 1, 1, sh.getMaxColumns()).clearContent();
+    if (sh.getMaxColumns() < NCOL) sh.insertColumnsAfter(sh.getMaxColumns(), NCOL - sh.getMaxColumns());
+    if (moved.length) sh.getRange(2, 1, moved.length, NCOL).setValues(moved);
   }
   formatLog(sh);
   return sh;
@@ -980,6 +1032,11 @@ function formatLog(sh) {
   body("difficulty").setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(DIFFICULTY, true).setAllowInvalid(true).build());
   body("dayType").setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(Object.keys(VERDICT).map((k) => VERDICT[k].label), true).setAllowInvalid(true).build());
   sh.getRange(2, col("preview"), MAX_ROWS - 1, 4).insertCheckboxes();
+  sh.getRange(2, col("slip"), MAX_ROWS - 1, 3).insertCheckboxes();
+  body("sleepH").setNumberFormat("0.#").setHorizontalAlignment("center");
+  ["energy", "mood", "excused", "revised"].forEach((k) => body(k).setHorizontalAlignment("center"));
+  ["slept", "woke"].forEach((k) => body(k).setNumberFormat("HH:mm").setHorizontalAlignment("center"));
+  ["reasons", "revRanges"].forEach((k) => body(k).setWrap(true));
 
   const rules = [];
   const all = sh.getRange(2, 1, MAX_ROWS - 1, 2);
@@ -995,6 +1052,10 @@ function formatLog(sh) {
   rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo("Before takbīr").setBackground(C.greenSoft).setFontColor(C.green).setBold(true).setRanges([prayers]).build());
   rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo("Mosque (late)").setBackground(C.amberSoft).setFontColor("#8A5A00").setRanges([prayers]).build());
   rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo("No mosque").setBackground(C.redSoft).setFontColor(C.red).setRanges([prayers]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo("Excused").setBackground("#E3F0FF").setFontColor("#285A9E").setRanges([prayers]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberLessThan(6).setFontColor(C.red).setBold(true).setRanges([body("sleepH")]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo("A lot").setFontColor(C.red).setRanges([body("phone")]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo("None").setFontColor(C.green).setRanges([body("phone")]).build());
   rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThanOrEqualTo(8000).setFontColor(C.green).setBold(true).setRanges([body("steps")]).build());
   rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberBetween(1, 7999).setFontColor(C.red).setRanges([body("steps")]).build());
   rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThanOrEqualTo(3).setFontColor(C.green).setBold(true).setRanges([body("hours")]).build());
@@ -1009,6 +1070,565 @@ function formatLog(sh) {
   const f = sh.getFilter(); if (f) f.remove();
   sh.getRange(1, 1, MAX_ROWS, NCOL).createFilter();
   sh.setTabColor(C.violet);
+}
+
+/* ================================================================== context from the app */
+
+/** Remember the app's time zone, language, name and address, for reminders and letters. */
+function rememberContext(rows) {
+  const r = (rows || []).filter((x) => x && x.tz)[0];
+  if (!r) return;
+  const p = PropertiesService.getScriptProperties();
+  const cur = p.getProperties();
+  const want = { APP_TZ: String(r.tz || ""), APP_LANG: String(r.lang || "en"), APP_NAME: String(r.name || ""), APP_URL: String(r.app || "") };
+  Object.keys(want).forEach((k) => { if (want[k] && cur[k] !== want[k]) p.setProperty(k, want[k]); });
+}
+
+function appCtx() {
+  const p = PropertiesService.getScriptProperties();
+  return {
+    tz: p.getProperty("APP_TZ") || SpreadsheetApp.getActive().getSpreadsheetTimeZone(),
+    fr: p.getProperty("APP_LANG") === "fr",
+    name: p.getProperty("APP_NAME") || "",
+    url: p.getProperty("APP_URL") || "",
+  };
+}
+
+/* ================================================================== reading the Log */
+
+const avgOf = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const r1 = (x) => (x == null || isNaN(x) ? "–" : Math.round(x * 10) / 10);
+const r0 = (x) => (x == null || isNaN(x) ? "–" : Math.round(x));
+const pc = (a, b) => (b ? Math.round((a / b) * 100) + "%" : "–");
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const BAD_DAY = 60;
+
+/** "23:30", a Date (time cell) or a number (fraction of a day) → minutes after midnight. */
+function minutesOf(v) {
+  if (v instanceof Date) return v.getHours() * 60 + v.getMinutes();
+  if (typeof v === "number") return Math.round(v * 1440) % 1440;
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(v || ""));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+/** Every logged day as an object keyed like the app's row, oldest first. */
+function readDays() {
+  const sh = SpreadsheetApp.getActive().getSheetByName(LOG);
+  if (!sh) return [];
+  const last = lastDataRow(sh);
+  if (last < 2) return [];
+  const tz = SpreadsheetApp.getActive().getSpreadsheetTimeZone();
+  const rng = sh.getRange(2, 1, last - 1, NCOL);
+  const vals = rng.getValues(), disp = rng.getDisplayValues();
+  const iSlept = col("slept") - 1;
+  return vals.map((row, ri) => {
+    const o = {};
+    COLUMNS.forEach(([, k], i) => (o[k] = row[i]));
+    o.slept = disp[ri][iSlept];
+    o.key = dateKey(o.date, tz);
+    o.d = o.date instanceof Date ? o.date : new Date(o.key);
+    o.score = Number(o.score) || 0;
+    ["salah", "quran", "work", "walk", "bonus", "pages", "minutes", "hours", "steps", "sleepH", "energy", "mood", "revised", "excused"].forEach((k) => {
+      o[k] = o[k] === "" || o[k] == null ? null : Number(o[k]);
+    });
+    o.bed = minutesOf(o.slept);
+    o.ck = o.checkin === true;
+    o.slip = o.slip === true;
+    o.tawbah = o.tawbah === true;
+    return o;
+  }).filter((o) => o.key).sort((a, b) => (a.key < b.key ? -1 : 1));
+}
+
+function shiftKey(key, n) {
+  const [y, m, d] = key.split("-").map(Number);
+  const x = new Date(Date.UTC(y, m - 1, d + n));
+  return x.toISOString().slice(0, 10);
+}
+
+/* ================================================================== Insights tab */
+
+/**
+ * Rebuilds the Insights tab: everything worth knowing about your days, computed fresh from the Log.
+ * Runs every night (via `tick`) and from the Muhasaba menu.
+ */
+function buildInsights() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(INSIGHTS);
+  if (!sh) sh = ss.insertSheet(INSIGHTS, 1);
+  sh.getCharts().forEach((c) => sh.removeChart(c));
+  sh.clear();
+  sh.clearConditionalFormatRules();
+  sh.setHiddenGridlines(true);
+  sh.setTabColor(C.green);
+  if (sh.getMaxColumns() < 12) sh.insertColumnsAfter(sh.getMaxColumns(), 12 - sh.getMaxColumns());
+  [24, 200, 110, 110, 110, 110, 110, 110, 24, 110, 110, 110].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+
+  const days = readDays();
+  const ctx = appCtx();
+  let row = 2;
+  sh.getRange(row, 2, 1, 7).merge().setValue("Insights").setFontSize(26).setFontWeight("bold").setFontColor(C.night);
+  row++;
+  sh.getRange(row, 2, 1, 7).merge()
+    .setValue(`${days.length} days logged · updated ${Utilities.formatDate(new Date(), ctx.tz, "EEE d MMM yyyy, HH:mm")} · refreshes every night`)
+    .setFontColor("#6A6688");
+  row += 2;
+
+  /** Writes one titled table. `rows` are arrays; `marks` colours given rows: { index: "good" | "bad" }. */
+  const block = (title, note, head, rows, marks) => {
+    sh.getRange(row, 2, 1, 7).merge().setValue(title).setFontSize(15).setFontWeight("bold").setFontColor(C.night);
+    row++;
+    if (note) { sh.getRange(row, 2, 1, 7).merge().setValue(note).setFontColor("#6A6688").setFontStyle("italic").setWrap(true); row++; }
+    if (!rows || !rows.length) { row++; return; }
+    const w = head.length;
+    sh.getRange(row, 2, 1, w).setValues([head]).setFontWeight("bold").setFontColor("#FFFFFF").setBackground(C.night);
+    const start = row + 1;
+    const data = rows.map((r) => head.map((_, i) => (r[i] == null ? "" : r[i])));
+    sh.getRange(start, 2, data.length, w).setValues(data).setVerticalAlignment("top");
+    data.forEach((_, i) => { if (i % 2) sh.getRange(start + i, 2, 1, w).setBackground(C.band); });
+    sh.getRange(start, 2, data.length, 1).setFontWeight("bold");
+    Object.keys(marks || {}).forEach((i) => {
+      const m = marks[i];
+      sh.getRange(start + Number(i), 2, 1, w).setBackground(m === "good" ? C.greenSoft : C.redSoft).setFontColor(m === "good" ? C.green : C.red);
+    });
+    const range = { start, end: start + data.length - 1, top: row };
+    row = start + data.length + 1;
+    return range;
+  };
+  const needs = (title, have, need, what) => block(title, `Needs ${need - have} more ${what} before this means anything (${have}/${need}). Keep logging, it fills in by itself.`, [], []);
+
+  if (!days.length) { block("Nothing to show yet", "Log a few days in the app and this tab fills itself.", [], []); return; }
+
+  const scores = days.map((d) => d.score);
+  const byKey = {};
+  days.forEach((d) => (byKey[d.key] = d));
+  const today = Utilities.formatDate(new Date(), ctx.tz, "yyyy-MM-dd");
+  const within = (n) => days.filter((d) => d.key > shiftKey(today, -n) && d.key <= today);
+
+  /* ---- Overview ---- */
+  let cur = 0, k = byKey[today] && byKey[today].score >= 70 ? today : shiftKey(today, -1);
+  while (byKey[k] && byKey[k].score >= 70) { cur++; k = shiftKey(k, -1); }
+  let best = 0, run = 0, prev = null;
+  days.forEach((d) => { run = d.score >= 70 ? (prev && shiftKey(prev, 1) === d.key ? run + 1 : 1) : 0; prev = d.score >= 70 ? d.key : null; best = Math.max(best, run); });
+  const top = days.reduce((a, b) => (b.score > a.score ? b : a));
+  const low = days.reduce((a, b) => (b.score < a.score ? b : a));
+  block("Overview", "", ["", "Value", "", "", "", "", ""], [
+    ["Days logged", days.length],
+    ["Average score", r1(avgOf(scores))],
+    ["Last 7 days", r1(avgOf(within(7).map((d) => d.score)))],
+    ["Last 30 days", r1(avgOf(within(30).map((d) => d.score)))],
+    ["Best day", `${r1(top.score)} · ${Utilities.formatDate(top.d, ctx.tz, "EEE d MMM")}`],
+    ["Hardest day", `${r1(low.score)} · ${Utilities.formatDate(low.d, ctx.tz, "EEE d MMM")}`],
+    ["Streak at 70+ (now / best)", `${cur} / ${best} days`],
+  ]);
+
+  /* ---- Weekdays ---- */
+  const wd = [1, 2, 3, 4, 5, 6, 0].map((w) => {
+    const xs = days.filter((d) => d.d.getDay() === w);
+    const a = (k2) => r1(avgOf(xs.map((d) => d[k2]).filter((v) => v != null)));
+    return { w, n: xs.length, avg: avgOf(xs.map((d) => d.score)), row: [WEEKDAYS[w], xs.length, a("score"), a("salah"), a("quran"), a("work"), a("walk")] };
+  });
+  const wdOk = wd.filter((x) => x.n);
+  const wdMarks = {};
+  let wdNote = `Early days: weekday patterns firm up after 3–4 weeks (${days.length} days so far).`;
+  if (days.length >= 14 && wdOk.length > 1) {
+    const hi = wdOk.reduce((a, b) => (b.avg > a.avg ? b : a)), lo = wdOk.reduce((a, b) => (b.avg < a.avg ? b : a));
+    if (hi !== lo) {
+      wdMarks[wd.indexOf(hi)] = "good"; wdMarks[wd.indexOf(lo)] = "bad";
+      wdNote = `Your best day is ${WEEKDAYS[hi.w]} (${r1(hi.avg)}), your hardest is ${WEEKDAYS[lo.w]} (${r1(lo.avg)}).`;
+    }
+  }
+  const wdRange = block("By day of the week", wdNote, ["Day", "Days", "Avg score", "Salah /40", "Qur'an /30", "Work /20", "Walk /10"], wd.map((x) => x.row), wdMarks);
+  if (wdRange) {
+    sh.insertChart(sh.newChart().asColumnChart()
+      .addRange(sh.getRange(wdRange.top, 2, 8, 1)).addRange(sh.getRange(wdRange.top, 4, 8, 1)).setNumHeaders(1)
+      .setPosition(wdRange.top, 10, 0, 0).setOption("title", "Average score by weekday").setOption("legend", { position: "none" })
+      .setOption("colors", [C.violet]).setOption("vAxis", { viewWindow: { min: 0, max: 100 } })
+      .setOption("width", 420).setOption("height", 240).build());
+  }
+
+  /* ---- Best & worst days ---- */
+  const line = (d) => [Utilities.formatDate(d.d, ctx.tz, "EEE d MMM yyyy"), r1(d.score), d.dayType || "", String(d.summary || "").slice(0, 160)];
+  const sorted = days.slice().sort((a, b) => b.score - a.score);
+  block("Your 5 best days", "", ["Date", "Score", "Day type", "The day in a line"], sorted.slice(0, 5).map(line));
+  block("Your 5 hardest days", "", ["Date", "Score", "Day type", "The day in a line"], sorted.slice(-5).reverse().map(line));
+
+  /* ---- Rebound ---- */
+  const nextOf = (pred) => days.filter(pred).map((d) => ({ d, n: byKey[shiftKey(d.key, 1)] })).filter((x) => x.n);
+  const reb = (label, list) => {
+    const better = list.filter((x) => x.n.score > x.d.score + 5).length, worse = list.filter((x) => x.n.score < x.d.score - 5).length;
+    return [label, list.length, r1(avgOf(list.map((x) => x.d.score))), r1(avgOf(list.map((x) => x.n.score))), pc(better, list.length), pc(list.length - better - worse, list.length), pc(worse, list.length)];
+  };
+  const badNext = nextOf((d) => d.score < BAD_DAY);
+  const back2 = days.filter((d) => d.score < BAD_DAY).filter((d) => [1, 2].some((i) => byKey[shiftKey(d.key, i)] && byKey[shiftKey(d.key, i)].score >= 70)).length;
+  const badCount = days.filter((d) => d.score < BAD_DAY).length;
+  block("How you respond to a bad day", badCount
+    ? `After a day under ${BAD_DAY}, you were back at 70+ within two days ${pc(back2, badCount)} of the time.`
+    : `No day under ${BAD_DAY} yet. Al-ḥamdu lillāh.`,
+    ["After…", "Times", "That day", "Next day", "Better", "Same", "Worse"], [
+      reb(`a day under ${BAD_DAY}`, badNext),
+      reb("a Hard day (journal)", nextOf((d) => d.dayType === VERDICT.hard.label)),
+      reb("a Hard but good day", nextOf((d) => d.dayType === VERDICT.hard_good.label)),
+      reb("a Good day", nextOf((d) => d.dayType === VERDICT.good.label)),
+      reb("a day at 85+", nextOf((d) => d.score >= 85)),
+    ]);
+
+  /* ---- What comes with bad days ---- */
+  const ck = days.filter((d) => d.ck);
+  if (ck.length < 7) needs("What comes with your bad days", ck.length, 7, "evening check-ins");
+  else {
+    const bad = ck.filter((d) => d.score < BAD_DAY || d.dayType === VERDICT.hard.label), rest = ck.filter((d) => bad.indexOf(d) < 0);
+    const share = (xs, f) => pc(xs.filter(f).length, xs.length);
+    const fac = [
+      ["Slept under 6 h", (d) => d.sleepH != null && d.sleepH < 6],
+      ["Went to sleep after 01:00", (d) => d.bed != null && d.bed >= 60 && d.bed < 12 * 60],
+      ["Phone: a lot", (d) => d.phone === "A lot"],
+      ["Slipped", (d) => d.slip],
+      ["Low energy (1–2)", (d) => d.energy != null && d.energy <= 2],
+      ["Low mood (1–2)", (d) => d.mood != null && d.mood <= 2],
+      ["Missed Subh in the mosque", (d) => d.subh === "No mosque"],
+      ["Under 2,000 steps", (d) => d.steps != null && d.steps < 2000],
+    ];
+    const rowsF = fac.map(([label, f]) => {
+      const a = bad.filter(f).length / (bad.length || 1), b = rest.filter(f).length / (rest.length || 1);
+      return { label, a, b, row: [label, share(bad, f), share(rest, f), bad.length ? (a - b >= 0 ? "+" : "") + Math.round((a - b) * 100) + " pts" : "–"] };
+    });
+    const ranked = rowsF.slice().sort((x, y) => (y.a - y.b) - (x.a - x.b));
+    const marks = {};
+    if (bad.length >= 3) ranked.slice(0, 2).forEach((x) => { if (x.a - x.b > 0.1) marks[rowsF.indexOf(x)] = "bad"; });
+    block("What comes with your bad days", bad.length
+      ? `Compared over ${ck.length} checked-in days (${bad.length} bad, ${rest.length} others). The biggest gaps are the likeliest causes, in red.`
+      : "No bad days among your checked-in days yet.",
+      ["Factor", "On bad days", "On other days", "Gap"], rowsF.map((x) => x.row), marks);
+  }
+
+  /* ---- Sleep, phone, energy, mood ---- */
+  if (ck.length >= 7) {
+    const bucketRows = (groups) => groups.map(([label, f]) => { const xs = ck.filter(f); return [label, xs.length, r1(avgOf(xs.map((d) => d.score))), r1(avgOf(xs.map((d) => d.salah).filter((v) => v != null))), r1(avgOf(xs.map((d) => d.quran).filter((v) => v != null)))]; });
+    const hiLo = (rows2) => {
+      const ok = rows2.filter((r) => r[1] > 0 && typeof r[2] === "number");
+      const m = {};
+      if (ok.length > 1) { m[rows2.indexOf(ok.reduce((a, b) => (b[2] > a[2] ? b : a)))] = "good"; m[rows2.indexOf(ok.reduce((a, b) => (b[2] < a[2] ? b : a)))] = "bad"; }
+      return m;
+    };
+    const sleepRows = bucketRows([
+      ["Under 6 h", (d) => d.sleepH != null && d.sleepH < 6], ["6–7 h", (d) => d.sleepH >= 6 && d.sleepH < 7],
+      ["7–8 h", (d) => d.sleepH >= 7 && d.sleepH < 8], ["8 h or more", (d) => d.sleepH >= 8]]);
+    const sleepRange = block("Score by hours of sleep", "", ["Sleep", "Days", "Avg score", "Salah", "Qur'an"], sleepRows, hiLo(sleepRows));
+    if (sleepRange) {
+      sh.insertChart(sh.newChart().asColumnChart()
+        .addRange(sh.getRange(sleepRange.top, 2, 5, 1)).addRange(sh.getRange(sleepRange.top, 4, 5, 1)).setNumHeaders(1)
+        .setPosition(sleepRange.top, 10, 0, 0).setOption("title", "Score by sleep").setOption("legend", { position: "none" })
+        .setOption("colors", [C.green]).setOption("vAxis", { viewWindow: { min: 0, max: 100 } })
+        .setOption("width", 420).setOption("height", 220).build());
+    }
+    const bedRows = bucketRows([
+      ["Before 23:00", (d) => d.bed != null && d.bed >= 12 * 60 && d.bed < 23 * 60], ["23:00–00:00", (d) => d.bed >= 23 * 60],
+      ["00:00–01:00", (d) => d.bed != null && d.bed < 60], ["After 01:00", (d) => d.bed != null && d.bed >= 60 && d.bed < 12 * 60]]);
+    block("Score by bedtime (the night before)", "", ["Went to sleep", "Days", "Avg score", "Salah", "Qur'an"], bedRows, hiLo(bedRows));
+    const phoneRows = bucketRows([["None", (d) => d.phone === "None"], ["A bit", (d) => d.phone === "A bit"], ["A lot", (d) => d.phone === "A lot"]]);
+    const nextPhone = (v) => r1(avgOf(ck.filter((d) => d.phone === v).map((d) => byKey[shiftKey(d.key, 1)]).filter(Boolean).map((n) => n.score)));
+    block("Score by phone & scrolling", `The day after scrolling a lot you average ${nextPhone("A lot")}; after no scrolling, ${nextPhone("None")}.`,
+      ["Phone", "Days", "Avg score", "Salah", "Qur'an"], phoneRows, hiLo(phoneRows));
+    const scale = (key2, label) => {
+      const rows2 = bucketRows([1, 2, 3, 4, 5].map((n) => [`${label} ${n}/5`, (d) => d[key2] === n]));
+      return block(`Score by ${label.toLowerCase()}`, "", [label, "Days", "Avg score", "Salah", "Qur'an"], rows2, hiLo(rows2));
+    };
+    scale("energy", "Energy");
+    scale("mood", "Mood");
+
+    const slips = ck.filter((d) => d.slip), clean = ck.filter((d) => !d.slip);
+    const cmp = (label, f, fmt) => [label, fmt(slips.map(f)), fmt(clean.map(f))];
+    const share = (xs) => pc(xs.filter(Boolean).length, xs.length);
+    const mean = (xs) => r1(avgOf(xs.filter((v) => v != null)));
+    block("Days you slipped", slips.length
+      ? `${slips.length} of ${ck.length} checked-in days. Tawbah made on ${slips.filter((d) => d.tawbah).length} of them. May Allah accept it.`
+      : "None marked. Al-ḥamdu lillāh.",
+      ["", "Slipped days", "Other days"], slips.length ? [
+        cmp("Average score", (d) => d.score, mean),
+        cmp("Sleep (h)", (d) => d.sleepH, mean),
+        cmp("Asleep after 01:00", (d) => d.bed != null && d.bed >= 60 && d.bed < 720, share),
+        cmp("Phone: a lot", (d) => d.phone === "A lot", share),
+        cmp("Energy", (d) => d.energy, mean),
+        cmp("Mood", (d) => d.mood, mean),
+        cmp("All 5 prayers in the mosque", (d) => PR.every((p) => d[p] === "Before takbīr" || d[p] === "Mosque (late)" || d[p] === "Excused"), share),
+      ] : []);
+  }
+
+  /* ---- Salah ---- */
+  const salahRows = PR.map((p) => {
+    const xs = days.filter((d) => d[p]);
+    const exc = xs.filter((d) => d[p] === "Excused").length, base = xs.length - exc;
+    const reasons = {};
+    days.forEach((d) => { const m = new RegExp(PRNAME[p] + ": ([^·✓(]+)").exec(String(d.reasons || "")); if (m) { const r = m[1].trim(); reasons[r] = (reasons[r] || 0) + 1; } });
+    const topR = Object.keys(reasons).sort((a, b) => reasons[b] - reasons[a])[0];
+    return { p, rate: base ? xs.filter((d) => d[p] === "Before takbīr").length / base : null,
+      row: [PRNAME[p], xs.length, pc(xs.filter((d) => d[p] === "Before takbīr").length, base), pc(xs.filter((d) => d[p] === "Before takbīr" || d[p] === "Mosque (late)").length, base), pc(xs.filter((d) => d[p] === "No mosque").length, base), exc, topR ? `${topR} (${reasons[topR]}×)` : ""] };
+  });
+  const rated = salahRows.filter((x) => x.rate != null);
+  const sMarks = {};
+  if (rated.length > 1 && days.length >= 7) {
+    sMarks[salahRows.indexOf(rated.reduce((a, b) => (b.rate > a.rate ? b : a)))] = "good";
+    sMarks[salahRows.indexOf(rated.reduce((a, b) => (b.rate < a.rate ? b : a)))] = "bad";
+  }
+  block("Salah, prayer by prayer", "Percentages leave out excused prayers.", ["Prayer", "Logged", "Before takbīr", "In the mosque", "No mosque", "Excused", "Top reason when late"], salahRows.map((x) => x.row), sMarks);
+
+  const reasonCount = {};
+  days.forEach((d) => String(d.reasons || "").split(" · ").forEach((part) => {
+    const m = /^(\w+): ([^✓(]+)/.exec(part.trim());
+    if (!m) return;
+    const r = m[2].trim();
+    reasonCount[r] = reasonCount[r] || { n: 0, at: {} };
+    reasonCount[r].n++;
+    reasonCount[r].at[m[1]] = (reasonCount[r].at[m[1]] || 0) + 1;
+  }));
+  const rKeys = Object.keys(reasonCount).sort((a, b) => reasonCount[b].n - reasonCount[a].n);
+  block("Why you were late or missed the mosque", rKeys.length ? "" : "Pick a reason on the Salah card when you're late or miss the mosque, and it adds up here.",
+    ["Reason", "Times", "Most often at", "Excuse?"], rKeys.map((r) => {
+      const at = reasonCount[r].at, top2 = Object.keys(at).sort((a, b) => at[b] - at[a])[0];
+      return [r, reasonCount[r].n, `${top2} (${at[top2]}×)`, ["Travelling", "Ill", "Menstruation", "Rain / danger"].indexOf(r) >= 0 ? "Yes" : "No"];
+    }));
+
+  /* ---- Qur'an ---- */
+  const lastP = days.slice().reverse().find((d) => d.portion);
+  const memorised = lastP ? (Number(String(lastP.portion).split(/[–-]/)[0]) - 1 || 0) + (lastP.pages || 0) : 0;
+  const pace28 = within(28).reduce((n, d) => n + (d.pages || 0), 0) / 28;
+  const finish = pace28 > 0 ? new Date(Date.now() + ((604 - memorised) / pace28) * 864e5) : null;
+  const timed = days.filter((d) => d.pages > 0 && d.minutes > 0);
+  const mpp = (xs) => r0(avgOf(xs.map((d) => d.minutes / d.pages)));
+  const qRows = [
+    ["Pages memorised in total", memorised ? `${memorised} / 604 (${Math.round((memorised / 604) * 100)}%)` : "–"],
+    ["Memorised since you started logging", days.reduce((n, d) => n + (d.pages || 0), 0) + " pages"],
+    ["Pace, last 4 weeks", `${r1(pace28 * 7)} pages a week`],
+    ["Finish the Mushaf at this pace", finish ? Utilities.formatDate(finish, ctx.tz, "MMMM yyyy") + ", in shāʾ Allāh" : "–"],
+    ["Minutes per page (all)", timed.length ? `${mpp(timed)} min · ${timed.length} timed days` : "Time your ḥifẓ to see this"],
+    ["… on Easy days", mpp(timed.filter((d) => d.difficulty === "Easy"))],
+    ["… on Normal days", mpp(timed.filter((d) => d.difficulty === "Normal"))],
+    ["… on Hard days", mpp(timed.filter((d) => d.difficulty === "Hard"))],
+    ["Revised pages, last 7 / 30 days", `${within(7).reduce((n, d) => n + (d.revised || 0), 0)} / ${within(30).reduce((n, d) => n + (d.revised || 0), 0)}`],
+    ["Days with murājaʿa (last 30)", pc(within(30).filter((d) => d.revised > 0).length, within(30).length)],
+    ["Juz read (days)", days.filter((d) => d.juz === true).length],
+    ["Al-Mulk after Subh / Maghrib", `${days.filter((d) => d.mulkSubh === true).length} / ${days.filter((d) => d.mulkMaghrib === true).length} days`],
+  ];
+  if (timed.length >= 6) {
+    const half = Math.floor(timed.length / 2);
+    const a = avgOf(timed.slice(0, half).map((d) => d.minutes / d.pages)), b = avgOf(timed.slice(half).map((d) => d.minutes / d.pages));
+    qRows.splice(5, 0, ["Getting faster?", b < a ? `Yes: ${r0(a)} → ${r0(b)} min per page` : `Not yet: ${r0(a)} → ${r0(b)} min per page`]);
+  }
+  block("Qur'an & ḥifẓ", "", ["", "Value"], qRows);
+  const weeks = [];
+  for (let i = 7; i >= 0; i--) {
+    const end = shiftKey(today, -7 * i), startK = shiftKey(end, -6);
+    const xs = days.filter((d) => d.key >= startK && d.key <= end);
+    weeks.push([`Week of ${Utilities.formatDate(new Date(startK + "T12:00:00"), ctx.tz, "d MMM")}`, xs.reduce((n, d) => n + (d.pages || 0), 0), xs.reduce((n, d) => n + (d.revised || 0), 0), r1(xs.reduce((n, d) => n + (d.hours || 0), 0)), r0(avgOf(xs.map((d) => d.steps).filter((v) => v != null))), r1(avgOf(xs.map((d) => d.score)))]);
+  }
+  block("Week by week (last 8 weeks)", "", ["Week", "Pages", "Revised", "Work hours", "Avg steps", "Avg score"], weeks);
+
+  /* ---- Work & walk ---- */
+  const topicH = {};
+  days.forEach((d) => { const ts = String(d.topics || "").split(",").map((t) => t.trim()).filter(Boolean); ts.forEach((t) => (topicH[t] = (topicH[t] || 0) + (d.hours || 0) / ts.length)); });
+  const tk = Object.keys(topicH).sort((a, b) => topicH[b] - topicH[a]);
+  const deep = days.filter((d) => d.hours >= 2), little = days.filter((d) => (d.hours || 0) < 1);
+  block("MuslimPreneur work", `Days with 2 h+ of work average ${r1(avgOf(deep.map((d) => d.score)))}; days under 1 h average ${r1(avgOf(little.map((d) => d.score)))}.`,
+    ["Topic", "Hours (approx.)", "Share"], tk.map((t) => [t, r1(topicH[t]), pc(topicH[t], tk.reduce((n, x) => n + topicH[x], 0))]));
+  const walked = days.filter((d) => d.steps != null);
+  const goal = walked.filter((d) => d.steps >= 8000);
+  block("Walking", "", ["", "Value"], [
+    ["Average steps", r0(avgOf(walked.map((d) => d.steps)))],
+    ["Days at 8,000+", `${goal.length} (${pc(goal.length, walked.length)})`],
+    ["Avg score on 8k days / other days", `${r1(avgOf(goal.map((d) => d.score)))} / ${r1(avgOf(walked.filter((d) => d.steps < 8000).map((d) => d.score)))}`],
+    ["Best walk", walked.length ? `${walked.reduce((a, b) => (b.steps > a.steps ? b : a)).steps.toLocaleString()} steps` : "–"],
+  ]);
+
+  /* ---- Months ---- */
+  const months = {};
+  days.forEach((d) => { const m = d.key.slice(0, 7); (months[m] = months[m] || []).push(d); });
+  block("Month by month", "", ["Month", "Days", "Avg score", "Salah", "Qur'an", "Work", "Walk"], Object.keys(months).sort().reverse().map((m) => {
+    const xs = months[m], a = (k2) => r1(avgOf(xs.map((d) => d[k2]).filter((v) => v != null)));
+    return [Utilities.formatDate(new Date(m + "-15T12:00:00"), ctx.tz, "MMMM yyyy"), xs.length, a("score"), a("salah"), a("quran"), a("work"), a("walk")];
+  }));
+
+  /* ---- Day types & bonus ---- */
+  block("How your days felt (journal)", "", ["Day type", "Days", "Avg score", "Avg sleep (h)", "Phone a lot"], Object.keys(VERDICT).map((v) => {
+    const xs = days.filter((d) => d.dayType === VERDICT[v].label);
+    return [VERDICT[v].label, xs.length, r1(avgOf(xs.map((d) => d.score))), r1(avgOf(xs.map((d) => d.sleepH).filter((x) => x != null))), pc(xs.filter((d) => d.phone === "A lot").length, xs.filter((d) => d.phone).length)];
+  }));
+  const has = (w) => days.filter((d) => String(d.bonusList || "").indexOf(w) >= 0).length;
+  block("Voluntary deeds ✦", "", ["", "Days"], [
+    ["Tahajjud", has("Tahajjud")], ["Witr", has("Witr")], ["Ḍuḥā", has("Ḍuḥā")], ["Voluntary fasts", has("Voluntary fast")],
+    ["Morning / evening adhkār", `${has("Morning adhkār")} / ${has("Evening adhkār")}`], ["All 12 rawātib", has("Rawātib 12/12")],
+    ["Average bonus per day", r1(avgOf(days.map((d) => d.bonus || 0)))],
+  ]);
+
+  /* ---- Weekly letters ---- */
+  const letters = JSON.parse(PropertiesService.getScriptProperties().getProperty("LETTERS") || "[]");
+  block("Weekly letters", letters.length ? "Written every Sunday evening from your week." : "Your first letter arrives on Sunday evening. Or: Muhasaba menu → Write this week's letter now.",
+    ["Week", "Letter"], letters.map((l) => [l.week, `=HYPERLINK("${l.url}","${String(l.title || "Open").replace(/"/g, "'")} ↗")`]));
+}
+
+const PR = ["subh", "dhuhr", "asr", "maghrib", "isha"];
+const PRNAME = { subh: "Subh", dhuhr: "Dhuhr", asr: "Asr", maghrib: "Maghrib", isha: "Isha" };
+
+/* ================================================================== hourly heartbeat */
+
+/** Runs every hour: the 22:00 reminder, the night-time Insights refresh, and the Sunday letter. */
+function tick() {
+  const ctx = appCtx();
+  const p = PropertiesService.getScriptProperties();
+  const now = new Date();
+  const hour = Number(Utilities.formatDate(now, ctx.tz, "H"));
+  const dayK = Utilities.formatDate(now, ctx.tz, "yyyy-MM-dd");
+  const dow = Utilities.formatDate(now, ctx.tz, "u"); // 7 = Sunday
+  if (hour >= REMIND_HOUR && p.getProperty("REMINDED") !== dayK && p.getProperty("REMIND_OFF") !== "1") {
+    p.setProperty("REMINDED", dayK);
+    try { sendReminder(dayK, false); } catch (err) { console.error("Reminder failed", err); }
+  }
+  if (hour >= 3 && p.getProperty("INSIGHTS_DAY") !== dayK) {
+    p.setProperty("INSIGHTS_DAY", dayK);
+    try { buildInsights(); } catch (err) { console.error("Insights failed", err); }
+  }
+  if (dow === "7" && hour >= LETTER_HOUR && p.getProperty("LETTER_DAY") !== dayK) {
+    p.setProperty("LETTER_DAY", dayK);
+    try { weeklyLetter(dayK); } catch (err) { console.error("Weekly letter failed", err); }
+  }
+}
+
+/* ================================================================== nightly reminder email */
+
+/** Emails you what's still missing today. Sends nothing when the day is complete (unless `always`). */
+function sendReminder(dayK, always) {
+  const ctx = appCtx();
+  const T = (en, fr) => (ctx.fr ? fr : en);
+  const d = readDays().find((x) => x.key === dayK);
+  const missing = [];
+  if (!d) missing.push(T("Nothing logged today yet.", "Rien n'est encore noté aujourd'hui."));
+  else {
+    const left = PR.filter((p) => !d[p]).map((p) => PRNAME[p]);
+    if (left.length) missing.push(T("Prayers not logged: ", "Prières non notées : ") + left.join(", "));
+    if (!d.ck) missing.push(T("The evening check-in (sleep, phone, energy, mood).", "Le bilan du soir (sommeil, téléphone, énergie, humeur)."));
+    if (!d.pages) missing.push(T("Today's ḥifẓ pages.", "Les pages de ḥifẓ du jour."));
+    const store = storeSheet(), r = storeFind(store, dayK);
+    const entries = r ? JSON.parse(storeRead(store, r).entries || "[]") : [];
+    if (!entries.length) missing.push(T("No journal entry yet: one line about your day is enough.", "Aucune note dans le journal : une ligne sur la journée suffit."));
+  }
+  if (!missing.length && !always) return false;
+  const to = Session.getEffectiveUser().getEmail();
+  const hi = ctx.name ? T(`As-salāmu ʿalaykum ${ctx.name},`, `As-salāmu ʿalaykum ${ctx.name},`) : "As-salāmu ʿalaykum,";
+  const score = d ? T(`Today so far: ${r1(d.score)}/100.`, `Aujourd'hui pour l'instant : ${r1(d.score)}/100.`) : "";
+  const list = missing.length ? missing : [T("Everything is logged. Mā shāʾ Allāh.", "Tout est noté. Mā shāʾ Allāh.")];
+  const btn = ctx.url ? `<p><a href="${ctx.url}" style="display:inline-block;background:#5A3FD6;color:#fff;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:bold">${T("Open Muhasaba", "Ouvrir Muhasaba")}</a></p>` : "";
+  MailApp.sendEmail({
+    to: to,
+    name: "Muhasaba",
+    subject: missing.length ? T(`Muhasaba · ${missing.length} thing${missing.length > 1 ? "s" : ""} left for today`, `Muhasaba · encore ${missing.length} chose${missing.length > 1 ? "s" : ""} pour aujourd'hui`) : "Muhasaba",
+    htmlBody: `<div style="font-family:Arial,sans-serif;font-size:15px;color:#1B1F4B;line-height:1.5">
+      <p>${hi}</p><p>${score}</p><ul>${list.map((x) => `<li>${x}</li>`).join("")}</ul>${btn}
+      <p style="color:#8A86A6;font-size:12px">${T("Sent at 22:00 when something is missing. Turn it off from the Muhasaba menu in your sheet.", "Envoyé à 22h quand il manque quelque chose. Désactivable depuis le menu Muhasaba de la feuille.")}</p></div>`,
+  });
+  return true;
+}
+
+function testReminder() {
+  const ctx = appCtx();
+  sendReminder(Utilities.formatDate(new Date(), ctx.tz, "yyyy-MM-dd"), true);
+  SpreadsheetApp.getActive().toast("Test email sent to " + Session.getEffectiveUser().getEmail(), "Muhasaba");
+}
+
+function toggleReminder() {
+  const p = PropertiesService.getScriptProperties();
+  const off = p.getProperty("REMIND_OFF") === "1";
+  if (off) p.deleteProperty("REMIND_OFF"); else p.setProperty("REMIND_OFF", "1");
+  SpreadsheetApp.getActive().toast(off ? "Nightly email is ON (22:00 when something is missing)." : "Nightly email is OFF.", "Muhasaba");
+}
+
+/* ================================================================== weekly letter */
+
+function weeklyLetterMenu() {
+  const ctx = appCtx();
+  const url = weeklyLetter(Utilities.formatDate(new Date(), ctx.tz, "yyyy-MM-dd"));
+  SpreadsheetApp.getActive().toast(url ? "This week's letter is in your Drive and your inbox." : "Not enough logged this week for a letter.", "Muhasaba");
+}
+
+/**
+ * Every Sunday evening: the AI reads the last 7 days (scores, journals, check-ins, reasons) and writes you a short
+ * letter: what went well, what was hard, one pattern, one focus for next week. Saved as a Doc and emailed.
+ */
+function weeklyLetter(endK) {
+  const ctx = appCtx();
+  const startK = shiftKey(endK, -6);
+  const days = readDays().filter((d) => d.key >= startK && d.key <= endK);
+  if (days.length < 3) return null;
+  const store = storeSheet();
+  const facts = days.map((d) => {
+    const r = storeFind(store, d.key);
+    const o = r ? storeRead(store, r) : {};
+    return {
+      date: Utilities.formatDate(d.d, ctx.tz, "EEE d MMM"), score: d.score, salah: d.salah, quran: d.quran, work: d.work, walk: d.walk,
+      prayers: PR.map((p) => `${PRNAME[p]}: ${d[p] || "–"}`).join(", "), why: d.reasons || "", pages: d.pages, revised: d.revised,
+      hours: d.hours, topics: d.topics, steps: d.steps, sleep: d.sleepH, phone: d.phone, energy: d.energy, mood: d.mood,
+      slipped: d.slip, tawbah: d.tawbah, bonus: d.bonusList, dayType: d.dayType, journal: [o.title, o.summary].filter(Boolean).join(". "),
+    };
+  });
+  const prev = readDays().filter((d) => d.key >= shiftKey(startK, -7) && d.key < startK);
+  const prompt = [
+    `You write a short weekly letter to ${ctx.name || "a young Muslim"} who tracks his days in an app called Muhasaba: salah (40 pts), Qur'an memorisation (30), work on his business MuslimPreneur (20) and walking (10), plus an evening check-in (sleep, phone use, energy, mood, a private "slipped" mark and whether he made tawbah).`,
+    `Write in ${ctx.fr ? "French" : "English"}, warm and honest like a wise older brother, never preachy or flattering. Use only the facts given. Mention a slip only gently and only if tawbah context helps; never ask about details.`,
+    `Previous week's average score: ${prev.length ? Math.round(avgOf(prev.map((d) => d.score))) : "unknown"}.`,
+    "This week (JSON):",
+    JSON.stringify(facts),
+    'Reply with JSON only: {"title":"max 7 words","opening":"2 sentences","wins":["3 short specific points"],"hard":["1-3 short specific points"],"pattern":"one pattern you notice, citing numbers","focus":"one concrete focus for next week","dua":"a short duʿāʾ"}',
+  ].join("\n");
+  let L = null;
+  try { L = parseJson(callAI(prompt, 3000)); } catch (err) { console.error("Letter AI failed", err); }
+  const avgW = Math.round(avgOf(days.map((d) => d.score)));
+  if (!L) L = { title: `Your week: ${avgW}/100`, opening: "No AI key, so here are your numbers.", wins: [], hard: [], pattern: "", focus: "", dua: "" };
+
+  const week = `${Utilities.formatDate(days[0].d, ctx.tz, "d MMM")} – ${Utilities.formatDate(days[days.length - 1].d, ctx.tz, "d MMM yyyy")}`;
+  const folder = (() => { const parent = journalFolder(); const it = parent.getFoldersByName("Weekly letters"); return it.hasNext() ? it.next() : parent.createFolder("Weekly letters"); })();
+  const doc = DocumentApp.create(`Muhasaba · Week of ${week}`);
+  DriveApp.getFileById(doc.getId()).moveTo(folder);
+  const body = doc.getBody();
+  body.setMarginLeft(56).setMarginRight(56);
+  const A = DocumentApp.Attribute;
+  const style = (o) => { const x = {}; Object.keys(o).forEach((k) => (x[A[k]] = o[k])); return x; };
+  const H = (t, lvl) => { const h = body.appendParagraph(t); h.setHeading(lvl); h.setAttributes(style({ FOREGROUND_COLOR: C.night, FONT_FAMILY: "Roboto", BOLD: true })); return h; };
+  const P = (t) => { const x = body.appendParagraph(t); x.setAttributes(style({ FONT_FAMILY: "Lora", FONT_SIZE: 11.5, FOREGROUND_COLOR: "#2A2840" })); x.setLineSpacing(1.35); x.setSpacingAfter(8); return x; };
+  const LI = (t) => { const li = body.appendListItem(t); li.setGlyphType(DocumentApp.GlyphType.BULLET); li.setAttributes(style({ FONT_FAMILY: "Lora", FONT_SIZE: 11.5 })); li.setSpacingAfter(4); return li; };
+  const first = body.getParagraphs()[0];
+  first.setText(L.title || "Your week");
+  first.setHeading(DocumentApp.ParagraphHeading.TITLE);
+  first.setAttributes(style({ FOREGROUND_COLOR: C.night, FONT_FAMILY: "Roboto", BOLD: true }));
+  const sub = body.appendParagraph(`${week} · ${ctx.fr ? "moyenne" : "average"} ${avgW}/100 · ${days.length} ${ctx.fr ? "jours" : "days"}`);
+  sub.setAttributes(style({ FOREGROUND_COLOR: "#8A86A6", FONT_SIZE: 10, FONT_FAMILY: "Roboto" }));
+  P(L.opening || "");
+  if ((L.wins || []).length) { H(ctx.fr ? "Ce qui a bien marché" : "What went well", DocumentApp.ParagraphHeading.HEADING2); L.wins.forEach(LI); }
+  if ((L.hard || []).length) { H(ctx.fr ? "Ce qui a été dur" : "What was hard", DocumentApp.ParagraphHeading.HEADING2); L.hard.forEach(LI); }
+  if (L.pattern) { H(ctx.fr ? "Ce que je remarque" : "A pattern", DocumentApp.ParagraphHeading.HEADING2); P(L.pattern); }
+  if (L.focus) { H(ctx.fr ? "Une seule chose pour la semaine prochaine" : "One focus for next week", DocumentApp.ParagraphHeading.HEADING2); P(L.focus); }
+  H(ctx.fr ? "Les chiffres" : "The numbers", DocumentApp.ParagraphHeading.HEADING2);
+  const t = body.appendTable([["", ctx.fr ? "Score" : "Score", "Salah", "Qur'an", ctx.fr ? "Travail" : "Work", ctx.fr ? "Marche" : "Walk", ctx.fr ? "Sommeil" : "Sleep"]].concat(
+    days.map((d) => [Utilities.formatDate(d.d, ctx.tz, "EEE d"), String(r1(d.score)), String(r1(d.salah)), String(r1(d.quran)), String(r1(d.work)), String(r1(d.walk)), d.sleepH != null ? d.sleepH + " h" : "–"])));
+  t.setBorderColor("#E4E1F0");
+  t.setAttributes(style({ FONT_SIZE: 10, FONT_FAMILY: "Roboto" }));
+  const hr = t.getRow(0); for (let i = 0; i < hr.getNumCells(); i++) hr.getCell(i).setBackgroundColor(C.night).editAsText().setForegroundColor("#FFFFFF").setBold(true);
+  if (L.dua) {
+    body.appendParagraph("");
+    const du = body.appendParagraph(L.dua);
+    du.setAttributes(style({ ITALIC: true, FOREGROUND_COLOR: C.violet, FONT_FAMILY: "Lora", FONT_SIZE: 12 }));
+    du.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+  }
+  doc.saveAndClose();
+  const url = doc.getUrl();
+
+  const p = PropertiesService.getScriptProperties();
+  const letters = JSON.parse(p.getProperty("LETTERS") || "[]");
+  letters.unshift({ week: week, url: url, title: L.title || "" });
+  p.setProperty("LETTERS", JSON.stringify(letters.slice(0, 26)));
+  try {
+    MailApp.sendEmail({ to: Session.getEffectiveUser().getEmail(), name: "Muhasaba", subject: `Muhasaba · ${L.title || (ctx.fr ? "Ta semaine" : "Your week")}`,
+      htmlBody: `<div style="font-family:Arial,sans-serif;font-size:15px;color:#1B1F4B;line-height:1.5"><p>${L.opening || ""}</p>${L.focus ? `<p><b>${ctx.fr ? "Pour la semaine prochaine" : "Next week"}:</b> ${L.focus}</p>` : ""}<p><a href="${url}" style="display:inline-block;background:#5A3FD6;color:#fff;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:bold">${ctx.fr ? "Lire la lettre" : "Read the letter"}</a></p></div>` });
+  } catch (err) { console.error("Letter email failed", err); }
+  try { buildInsights(); } catch (err) { console.error(err); }
+  return url;
 }
 
 /* ================================================================== dashboard */
@@ -1042,7 +1662,7 @@ function buildDashboard(force) {
     ["🟢 Good days", `=COUNTIF(${L("dayType")},"${VERDICT.good.label}")`, "0", VERDICT.good.fill],
     ["🟡 Hard but good", `=COUNTIF(${L("dayType")},"${VERDICT.hard_good.label}")`, "0", VERDICT.hard_good.fill],
     ["🔴 Hard days", `=COUNTIF(${L("dayType")},"${VERDICT.hard.label}")`, "0", VERDICT.hard.fill],
-    ["Prayers in the mosque", `=IFERROR((COUNTIF(${prayers},"Before takbīr")+COUNTIF(${prayers},"Mosque (late)"))/COUNTA(${prayers}),"–")`, "0%", C.violetSoft],
+    ["Prayers in the mosque", `=IFERROR((COUNTIF(${prayers},"Before takbīr")+COUNTIF(${prayers},"Mosque (late)"))/(COUNTA(${prayers})-COUNTIF(${prayers},"Excused")),"–")`, "0%", C.violetSoft],
     ["Before the takbīr", `=COUNTIF(${prayers},"Before takbīr")`, "0", C.violetSoft],
     ["Pages memorised", `=SUM(${L("pages")})`, "0", C.violetSoft],
     ["MuslimPreneur hours", `=SUM(${L("hours")})`, "0.#", C.violetSoft],

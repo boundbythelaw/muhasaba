@@ -44,6 +44,11 @@ export function overwrites(prev: DayLog | undefined, next: DayLog): Overwrite[] 
     const a = prev.prayers[id], b = next.prayers[id];
     if (a != null && a !== b) out.push({ field: `prayer:${id}`, text: `${tr(en)}: ${tr(PRAYER_LABEL[a])} → ${b == null ? tr("not set") : tr(PRAYER_LABEL[b])}` });
   }
+  const r0 = prev.rev ?? [], r1 = next.rev ?? [];
+  if (r1.length < r0.length) {
+    const gone = r0.find((r) => !r1.some((x) => x.from === r.from && x.to === r.to));
+    if (gone) out.push({ field: `rev:${gone.from}-${gone.to}`, text: tr("Remove revised pages {a}–{b}", { a: gone.from, b: gone.to }) });
+  }
   const q0 = prev.quran, q1 = next.quran;
   if (q0.mem > 0 && q0.mem !== q1.mem) out.push({ field: "mem", text: `${tr("Memorised")}: ${pages(q0.mem)} → ${q1.mem ? pages(q1.mem) : tr("not yet")}` });
   if (q0.minutes != null && q0.minutes !== q1.minutes) out.push({ field: "minutes", text: `${tr("Memorisation time")}: ${q0.minutes} min → ${q1.minutes == null ? tr("not set") : q1.minutes + " min"}` });

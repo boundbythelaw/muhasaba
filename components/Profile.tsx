@@ -22,6 +22,10 @@ export function ProfileCard() {
       <div className="ch"><h2>{tr("Profile & language")}</h2></div>
       <div className="lab">{tr("Language")}</div>
       <Segmented ariaLabel={tr("Language")} options={LANGS} value={prefs.lang} onSelect={(v) => { setPrefs({ lang: v }); haptic(8); }} />
+      <div className="lab">{tr("You are")}</div>
+      <Segmented ariaLabel={tr("You are")} value={prefs.gender || undefined}
+        options={[{ value: "m", label: "A brother" }, { value: "f", label: "A sister", sub: tr("shows the menstruation excuse") }]}
+        onSelect={(v) => { setPrefs({ gender: prefs.gender === v ? "" : (v as "m" | "f") }); haptic(8); }} />
       <div className="settings">
         <label>{tr("Your name")}
           <input className="inp" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} onBlur={() => setPrefs({ name: name.trim() })} />
@@ -70,6 +74,9 @@ export function Welcome() {
           <>
             <h3>{tr("What should we call you?")}</h3>
             <input className="inp big" autoFocus value={name} maxLength={40} placeholder={tr("Your first name")} onChange={(e) => setName(e.target.value)} />
+            <Segmented ariaLabel={tr("You are")} value={prefs.gender || undefined}
+              options={[{ value: "m", label: "A brother" }, { value: "f", label: "A sister" }]}
+              onSelect={(v) => { setPrefs({ gender: v as "m" | "f" }); haptic(8); }} />
             <div className="lab">{tr("Where do you pray?")}</div>
             <div className="locgrid">
               {PRESETS.map((p) => (

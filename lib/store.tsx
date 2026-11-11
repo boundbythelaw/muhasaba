@@ -310,12 +310,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       setSyncError("");
       setSyncStatus("ok");
+      // The script gained new columns: send every day again so the old rows fill in (no AI cost; ratings are kept).
+      const schema = "schema" in res ? res.schema : undefined;
+      if (schema && schema !== sheetRef.current.schema) {
+        setSheet((cur) => ({ ...cur, schema }));
+        if (sheetRef.current.schema) markDirty(Object.keys(daysRef.current));
+      }
     } else {
       setSyncStatus(res.error === "offline" ? "offline" : "error");
       setSyncError(res.error === "offline" ? "" : res.error || "Couldn't reach the sheet");
       setTimeout(() => setRetryTick((t) => t + 1), 30000);
     }
-  }, [mergeDocs]);
+  }, [mergeDocs, markDirty]);
 
   // Send a few seconds after the last change, and keep going until the queue is empty.
   const pendingCount = Object.keys(sheet.pending).length;

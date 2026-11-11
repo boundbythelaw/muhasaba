@@ -9,7 +9,11 @@ import { useStore } from "@/lib/store";
 import type { Difficulty, QuranLog } from "@/lib/types";
 import TimerBar from "./TimerBar";
 import { CardShell, CheckRow, Pill, Segmented, tap } from "./ui";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { clampRange, revisionStatus, STALE_DAYS } from "@/lib/revision";
+import { revPages } from "@/lib/scoring";
+import { revBonus } from "@/lib/bonus";
+import { Bar } from "./ui";
 
 export default function QuranCard() {
   const { day, days, prefs, cur, scores, update, timers, setTimers } = useStore();
@@ -93,6 +97,8 @@ export default function QuranCard() {
         <CheckRow on={q.mulkMaghrib} title={tr("Sūrat al-Mulk after Maghrib")} points={2.5} onToggle={toggle("mulkMaghrib")} />
       </div>
 
+      <Murajaa />
+
       <div className="ch">
         <div className="lab">{tr("Your Mushaf")} · {po.done}/{MUSHAF_PAGES}</div>
         <div className="lab num">{((po.done / MUSHAF_PAGES) * 100).toFixed(1)}%</div>
@@ -121,6 +127,60 @@ export default function QuranCard() {
           : tr("Mushaf complete. Al-ḥamdu lillāh.")}
       </p>
     </CardShell>
+  );
+}
+
+/** Murājaʿa: log the pages you revised today, and see which memorised pages are getting old. */
+function Murajaa() {
+  const { day, days, prefs, cur, update, locked, requestUnlock } = useStore();
+  const st = useMemo(() => revisionStatus(days, prefs, cur), [days, prefs, cur]);
+  const [a, setA] = useState("");
+  const [b, setB] = useState("");
+  const today = revPages(day.rev);
+  const add = (from: number, to: number) => {
+    if (locked) { requestUnlock(cur); return; }
+    const r = clampRange(from, to);
+    if (!r) return;
+    void update((d) => { d.rev.push(r); }, null, true, { noConfirm: true }).then((ok) => {
+      if (ok) { setA(""); setB(""); haptic(10); toast(tr("{n} pages revised. Bārak Allāhu fīk.", { n: r.to - r.from + 1 })); }
+    });
+  };
+  const pct = st.memorised ? (st.fresh / st.memorised) * 100 : 0;
+  return (
+    <div className="murajaa">
+      <div className="ch">
+        <div className="lab">{tr("Murājaʿa · revision")} <span className="ar" style={{ fontSize: 15 }}>مراجعة</span></div>
+        <div className="lab num">{today ? `${today}p · +${Math.round(revBonus(day) * 10) / 10} ✦` : tr("bonus ✦")}</div>
+      </div>
+      <Bar pct={pct} max={st.stale === 0 && st.memorised > 0} />
+      <p className="note">
+        {st.memorised === 0 ? tr("Pages you memorise will show up here.")
+          : st.stale === 0 ? tr("Every memorised page was revised in the last {d} days. Mā shāʾ Allāh.", { d: STALE_DAYS })
+          : tr("{s} of {m} memorised pages not revised in the last {d} days.", { s: st.stale, m: st.memorised, d: STALE_DAYS })}
+      </p>
+      {st.next && (
+        <motion.button className="revnext" {...tap} onClick={() => add(st.next!.from, st.next!.to)}>
+          <span><small>{tr("Next to revise")}</small><b className="num">{tr("Pages {a}–{b}", { a: st.next.from, b: st.next.to })}</b></span>
+          <em>{tr("I revised these")}</em>
+        </motion.button>
+      )}
+      <div className="revadd">
+        <input className="inp num" type="number" inputMode="numeric" placeholder={tr("from")} aria-label={tr("From page")} value={a} onChange={(e) => setA(e.target.value)} />
+        <span>–</span>
+        <input className="inp num" type="number" inputMode="numeric" placeholder={tr("to")} aria-label={tr("To page")} value={b} onChange={(e) => setB(e.target.value)} />
+        <motion.button className="btn" {...tap} disabled={!a} onClick={() => add(Number(a), Number(b || a))}>{tr("Add")}</motion.button>
+      </div>
+      {day.rev.length > 0 && (
+        <div className="row revlist">
+          {day.rev.map((r, i) => (
+            <span className="revchip num" key={`${r.from}-${r.to}-${i}`}>
+              {r.from === r.to ? `p. ${r.from}` : `p. ${r.from}–${r.to}`}
+              <button aria-label={tr("Remove")} onClick={() => update((d) => { d.rev.splice(i, 1); }, null)}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

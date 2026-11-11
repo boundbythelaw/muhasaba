@@ -48,8 +48,29 @@ export interface DocInfo {
   error?: string;
 }
 
+/** Why a prayer was late or missed at the mosque. The first four are valid excuses (full points when prayed properly). */
+export type PrayerReason = "travel" | "ill" | "period" | "weather" | "slept" | "phone" | "work" | "lazy" | "outage" | "other";
+export interface PrayerWhy { r: PrayerReason; /** for an excuse: prayed it the way the Sunnah allows */ ok?: boolean }
+
+/** The required evening check-in. Sleep is the night before this day. */
+export interface Checkin {
+  slept: string | null; // "HH:MM" went to sleep (last night)
+  woke: string | null; // "HH:MM" woke up (this morning)
+  phone: 0 | 1 | 2 | null; // scrolling: none / a bit / a lot
+  energy: number | null; // 1–5
+  mood: number | null; // 1–5
+  slip: boolean; // "I slipped today" (private)
+  tawbah: boolean;
+}
+
+/** A murājaʿa (revision) range, Mushaf pages inclusive. */
+export interface RevRange { from: number; to: number }
+
 export interface DayLog {
   prayers: Partial<Record<PrayerId, PrayerMark>>;
+  why: Partial<Record<PrayerId, PrayerWhy>>;
+  checkin: Checkin;
+  rev: RevRange[];
   quran: QuranLog;
   work: WorkLog;
   steps: number | null;
@@ -71,6 +92,8 @@ export interface Prefs {
   welcomed: boolean;
   prayerLoc: import("./prayerTimes").PrayerLocation;
   asr: "standard" | "hanafi";
+  /** Shows the menstruation excuse for women. */
+  gender: "m" | "f" | "";
 }
 
 export interface RunningTimer {

@@ -8,7 +8,7 @@ import { fmtTime, nextPrayer, timesFor, untilText } from "@/lib/prayerTimes";
 import { useEffect } from "react";
 import { addDays, birthday, greeting, hijri, longDate, ordinal, todayKey } from "@/lib/dates";
 import { burst, toast } from "@/lib/fx";
-import { fmt, grade, isMax, portion } from "@/lib/scoring";
+import { checkinDone, fmt, grade, isMax, portion } from "@/lib/scoring";
 import type { DayLog, Scores } from "@/lib/types";
 import { useStore } from "@/lib/store";
 import { AnimatedNumber, Bar, tap } from "./ui";
@@ -28,10 +28,12 @@ const SEGMENTS = (() => {
 })();
 
 /** The next few points worth earning, in the order of the day. */
-function nextUp(day: DayLog, scores: Scores, portionText: string, started: (id: string) => boolean): { text: string; pts: string; target: Pillar | "journal" } {
+function nextUp(day: DayLog, scores: Scores, portionText: string, started: (id: string) => boolean): { text: string; pts: string; target: Pillar | "journal" | "c" } {
   // Only prayers whose time has already come are worth logging now.
   const firstPrayer = PRAYERS.find(({ id }) => day.prayers[id] == null && started(id));
   if (firstPrayer) return { text: tr("Log {p}", { p: tr(firstPrayer.en) }), pts: tr("up to +8"), target: "p" };
+  // After Maghrib, the required check-in comes first.
+  if (started("maghrib") && !checkinDone(day.checkin)) return { text: tr("Evening check-in"), pts: tr("required"), target: "c" };
   if (day.quran.mem < 2) return { text: tr("Memorise {x}", { x: portionText }), pts: day.quran.mem ? "+8" : "+15", target: "q" };
   if (!day.quran.mulkSubh) return { text: tr("Al-Mulk after Subh"), pts: "+2.5", target: "q" };
   if (!day.quran.juz) return { text: tr("Read your juz"), pts: "+5", target: "q" };
@@ -39,10 +41,11 @@ function nextUp(day: DayLog, scores: Scores, portionText: string, started: (id: 
   if (!day.quran.mulkMaghrib) return { text: tr("Al-Mulk after Maghrib"), pts: "+2.5", target: "q" };
   if (scores.w < 20) return { text: tr("Deep work on MuslimPreneur"), pts: `+${fmt(20 - scores.w)}`, target: "w" };
   if (scores.s < 10) return { text: tr("Walk {n} more steps", { n: num(STEP_GOAL - (day.steps ?? 0)) }), pts: `+${fmt(10 - scores.s)}`, target: "s" };
+  if (!checkinDone(day.checkin)) return { text: tr("Evening check-in"), pts: tr("required"), target: "c" };
   return { text: tr("Everything's done. Write about your day"), pts: "✎", target: "journal" };
 }
 
-export default function Hero({ onJump }: { onJump: (p: Pillar | "journal") => void }) {
+export default function Hero({ onJump }: { onJump: (p: Pillar | "journal" | "c") => void }) {
   const { cur, dir, scores, shiftDay, goTo, day, days, prefs } = useStore();
   const po = portion(days, prefs, cur);
   const isTodayKey = cur === todayKey();

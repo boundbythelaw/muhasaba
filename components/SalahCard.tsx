@@ -1,7 +1,8 @@
 "use client";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import { PRAYERS } from "@/lib/constants";
+import { PRAYERS, REASONS, reasonOf, type PrayerId } from "@/lib/constants";
+import { excused } from "@/lib/scoring";
 import { todayKey } from "@/lib/dates";
 import { haptic, toast } from "@/lib/fx";
 import { getLang, getName, tr } from "@/lib/i18n";
@@ -57,18 +58,22 @@ export default function SalahCard() {
         return (
           <div className={`prow ${isLive ? "live" : ""} ${isNext ? "next" : ""}`} key={id}>
             <motion.button className="pname" title={tr("Tap to cycle")} {...tap}
-              onClick={(e) => update((d) => { const c = d.prayers[id]; d.prayers[id] = c == null ? 2 : c === 2 ? 1 : c === 1 ? 0 : 2; }, e)}>
+              onClick={(e) => update((d) => { const c = d.prayers[id]; d.prayers[id] = c == null ? 2 : c === 2 ? 1 : c === 1 ? 0 : 2; if (d.prayers[id] === 2) delete d.why[id]; }, e)}>
               <b>{tr(en)}</b>
               <span className="ptime num">
                 {at ? fmtTime(at, tz) : ""}
                 {isLive && <em className="tag now">{tr("now")}</em>}
                 {isNext && at && <em className="tag soon">{tr("in {t}", { t: untilText(at.getTime() - now.getTime(), getLang()) })}</em>}
                 {missed && <em className="tag miss">{tr("log it")}</em>}
+                {excused(day.why[id]) && <em className="tag ex">{tr("excused")}</em>}
               </span>
               <span className="par">{ar}</span>
             </motion.button>
             <Segmented ariaLabel={tr(en)} options={OPTIONS} value={day.prayers[id]}
-              onSelect={(v, e) => update((d) => { if (d.prayers[id] === v) delete d.prayers[id]; else d.prayers[id] = v; }, e)} />
+              onSelect={(v, e) => update((d) => { if (d.prayers[id] === v) { delete d.prayers[id]; delete d.why[id]; } else { d.prayers[id] = v; if (v === 2) delete d.why[id]; } }, e)} />
+            <AnimatePresence initial={false}>
+              {(day.prayers[id] === 0 || day.prayers[id] === 1 || day.why[id]) && <WhyRow id={id} />}
+            </AnimatePresence>
           </div>
         );
       })}
@@ -82,6 +87,49 @@ export default function SalahCard() {
       </AnimatePresence>
       <LocationSheet open={locOpen} onClose={() => setLocOpen(false)} />
     </CardShell>
+  );
+}
+
+/* ---------- Why late / not at the mosque ---------- */
+function WhyRow({ id }: { id: PrayerId }) {
+  const { day, update, prefs } = useStore();
+  const w = day.why[id];
+  const r = reasonOf(w?.r);
+  const list = REASONS.filter((x) => !x.women || prefs.gender === "f");
+  const set = (rid: (typeof REASONS)[number]["id"]) => update((d) => {
+    if (d.why[id]?.r === rid) delete d.why[id];
+    else d.why[id] = { r: rid, ok: rid === "period" ? true : undefined };
+  }, null, true, { noConfirm: true });
+  return (
+    <motion.div className="whyrow" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>
+      <div className="whychips">
+        <span className="whylab">{tr("Why?")}</span>
+        {list.map((x) => (
+          <motion.button key={x.id} {...tap} className={`whychip ${x.excuse ? "ex" : ""} ${w?.r === x.id ? "on" : ""}`} onClick={() => { set(x.id); haptic(6); }}>
+            {tr(x.label)}
+          </motion.button>
+        ))}
+      </div>
+      <AnimatePresence initial={false}>
+        {r?.excuse && (
+          <motion.div className="whyok" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>
+            {r.okLabel ? (
+              <motion.button {...tap} className={`whytick ${w?.ok ? "on" : ""}`}
+                onClick={(e) => update((d) => { const x = d.why[id]; if (x) x.ok = !x.ok; }, e, false, { noConfirm: true })}>
+                <i>{w?.ok ? "✓" : ""}</i><span>{tr(r.okLabel)}</span><b>{w?.ok ? tr("Excused · 8") : "+8"}</b>
+              </motion.button>
+            ) : (
+              <p className="note">{tr("You're not required to pray. It counts as full, in shāʾ Allāh.")}</p>
+            )}
+            {(w?.r === "travel" || w?.r === "period" || w?.r === "ill") && excused(w) && (
+              <motion.button {...tap} className="linkbtn" onClick={(e) => update((d) => {
+                for (const p of PRAYERS) { if (d.prayers[p.id] !== 2) { d.why[p.id] = { ...w! }; if (d.prayers[p.id] == null) d.prayers[p.id] = 0; } }
+              }, e, false, { noConfirm: true })}>{tr("Same for all of today's prayers")}</motion.button>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }
 
