@@ -121,8 +121,9 @@ function doPost(e) {
     catch (err) { return json({ ok: false, error: String(err && err.message ? err.message : err) }); }
   }
   // Photos only touch Drive, so they skip the lock too.
-  if (body.photo || body.photoGet || body.photoDelete || body.video) {
+  if (body.photo || body.photoGet || body.photoDelete || body.video || body.mediaFind) {
     try {
+      if (body.mediaFind) return json(Object.assign({ ok: true }, findMedia(body.mediaFind)));
       if (body.video) return json(Object.assign({ ok: true }, videoPart(body.video)));
       if (body.photo) return json(Object.assign({ ok: true }, savePhoto(body.photo)));
       if (body.photoGet) return json(Object.assign({ ok: true }, readPhoto(body.photoGet)));
@@ -718,6 +719,22 @@ function savePhoto(ph) {
   if (same.hasNext()) return { drive: same.next().getId() };
   const file = folder.createFile(Utilities.newBlob(bytes, String(ph.mime || "image/jpeg"), name));
   return { drive: file.getId() };
+}
+
+/**
+ * Finds a photo or video already in Drive by its app id (e.g. uploaded from another copy of the app),
+ * so a phone that doesn't have the file itself can still link to it.
+ */
+function findMedia(m) {
+  const id = String(m && m.id || "");
+  if (!/^p[a-z0-9]{4,26}$/.test(id)) throw new Error("Bad id");
+  const folder = m.kind === "video" ? videoFolder() : photoFolder();
+  const it = folder.searchFiles(`title contains '${id}' and trashed = false`);
+  while (it.hasNext()) {
+    const f = it.next();
+    if (f.getName().indexOf(`· ${id}.`) >= 0) return { drive: f.getId() };
+  }
+  return {};
 }
 
 /** Only files inside the Photos or Videos folder can be read or removed through the web link. */

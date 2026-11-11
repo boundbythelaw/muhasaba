@@ -61,6 +61,7 @@ interface StoreValue {
   photoUp: { busy: string | null; failed: Record<string, string>; progress: Record<string, number> };
   /** Fetch a photo back from Drive when it isn't on this phone (new phone, restored backup). */
   fetchPhoto: (id: string, drive: string, date: string) => Promise<boolean>;
+  retryPhoto: (id: string) => void;
 }
 
 const Ctx = createContext<StoreValue | null>(null);
@@ -423,19 +424,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setTimeout(() => setRetryTick((t) => t + 1), 300);
     };
 
+    const p0: { drive?: string; poster?: string } = {};
+    /** Look for the file in Drive by its id; if found, record it, otherwise explain where it still lives. */
+    const findInDrive = async (fileId: string, kind: "photo" | "video", set: (d: string) => void) => {
+      const res = await postToSheet(sh.url, { mediaFind: { id: fileId, date, kind } }, true);
+      if (res.ok && res.drive) {
+        set(res.drive);
+        setRef((p) => { if (p0.drive) p.drive = p0.drive; if (p0.poster) p.poster = p0.poster; });
+        done();
+        return;
+      }
+      photoFailedAt.current[id] = Date.now() + 1e12; // no automatic retry; the Retry button resets it
+      const msg = res.ok
+        ? tr("This file is only on the phone or app where you added it. Open Muhasaba there once so it uploads, then tap Retry here.")
+        : res.error === "unreachable" ? tr("Your Apps Script is out of date. Paste the new Code.gs and publish a new version.") : res.error || "";
+      setPhotoUp((u) => ({ busy: null, progress: u.progress, failed: msg ? { ...u.failed, [id]: msg } : u.failed }));
+    };
     photoBusy.current = true;
     setPhotoUp((u) => ({ ...u, busy: id }));
     try {
       if (ref.kind === "video" && !ref.poster) {
         // 1. the cover picture, saved like a photo
         const rec = await getPhoto(posterId(id));
-        if (!rec) { photoFailedAt.current[id] = Date.now() + 1e12; setPhotoUp((u) => ({ ...u, busy: null })); return; }
+        if (!rec) { await findInDrive(posterId(id), "photo", (d) => { p0.poster = d; }); return; }
         const res = await postToSheet(sh.url, { photo: { id: posterId(id), date, mime: "image/jpeg", data: await toBase64(rec.blob) } }, true);
         if (res.ok && res.drive) { setRef((p) => { p.poster = res.drive; }); done(); } else fail(res);
         return;
       }
       const rec = await getPhoto(id);
-      if (!rec) { photoFailedAt.current[id] = Date.now() + 1e12; setPhotoUp((u) => ({ ...u, busy: null })); return; } // not on this phone
+      // Not on this phone/app (e.g. added in another version of the app): it may already be in Drive.
+      if (!rec) { await findInDrive(id, ref.kind === "video" ? "video" : "photo", (d) => { p0.drive = d; }); return; }
       if (ref.kind !== "video") {
         const res = await postToSheet(sh.url, { photo: { id, date, mime: rec.blob.type || "image/jpeg", data: await toBase64(rec.blob) } }, true);
         if (res.ok && res.drive) { setRef((p) => { p.drive = res.drive; }); done(); } else fail(res);
@@ -480,6 +498,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [patchDay]);
   useEffect(() => { if (hydrated) void uploadPhotos(); }, [hydrated, days, sheet.url, retryTick, uploadPhotos]);
 
+  /** Try a stuck photo or video again now. */
+  const retryPhoto = useCallback((id: string) => {
+    delete photoFailedAt.current[id];
+    setPhotoUp((u) => { const failed = { ...u.failed }; delete failed[id]; return { ...u, failed }; });
+    setRetryTick((t) => t + 1);
+  }, []);
+
   const fetchPhoto = useCallback(async (id: string, drive: string, date: string) => {
     const sh = sheetRef.current;
     if (!sh.url) return false;
@@ -503,7 +528,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     hydrated, days, prefs, timers, cur, dir, view, day, scores, scoresOf,
     goTo, shiftDay, setView, update, setPrefs, setTimers, importData, exportData,
     sheet, syncStatus, syncError, connectSheet, disconnectSheet, resendAll, syncNow,
-    docs, polishDay, lookupDocs, photoUp, fetchPhoto,
+    docs, polishDay, lookupDocs, photoUp, fetchPhoto, retryPhoto,
     locked, isLocked, unlockFor, requestUnlock: setUnlockFor, unlockDay, unlockedUntil,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

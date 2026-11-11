@@ -131,7 +131,9 @@ export function CardShell({ id, title, ar, value, max, done, summary, children, 
           </motion.div>
         ) : (
           <motion.p key="sum" className="donestrip" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-            <span className="tick">✓</span> {summary ?? tr("Complete")} <span className="muted">· {tr("tap to open")}</span>
+            {done
+              ? <><span className="tick">✓</span> {summary ?? tr("Complete")} <span className="muted">· {tr("tap to open")}</span></>
+              : <span className="muted num">{fmt(value)} / {max} · {tr("tap to open")}</span>}
           </motion.p>
         )}
       </AnimatePresence>

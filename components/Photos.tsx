@@ -328,7 +328,7 @@ export function Lightbox({ photos, index, caption, onClose, onRemove }: {
 }) {
   const [i, setI] = useState(index);
   const p = photos[Math.min(i, photos.length - 1)];
-  const { photoUp } = useStore();
+  const { photoUp, retryPhoto } = useStore();
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); if (e.key === "ArrowRight") setI((x) => Math.min(x + 1, photos.length - 1)); if (e.key === "ArrowLeft") setI((x) => Math.max(x - 1, 0)); };
     addEventListener("keydown", k);
@@ -359,6 +359,9 @@ export function Lightbox({ photos, index, caption, onClose, onRemove }: {
         </div>
         {photos.length > 1 && (
           <motion.button className="btn ghost light lbnav" {...tap} disabled={i >= photos.length - 1} onClick={() => setI((x) => Math.min(photos.length - 1, x + 1))} aria-label={tr("Next")}>›</motion.button>
+        )}
+        {!saved && photoUp.busy !== p.id && (
+          <motion.button className="btn ghost light" {...tap} onClick={() => { retryPhoto(p.id); haptic(8); }}>{tr("Retry upload")}</motion.button>
         )}
         {onRemove && <motion.button className="btn danger" {...tap} onClick={() => onRemove(p)}>{tr("Remove")}</motion.button>}
         <motion.button className="btn" {...tap} onClick={onClose}>{tr("Close")}</motion.button>

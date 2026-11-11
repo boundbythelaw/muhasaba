@@ -640,3 +640,6 @@ textarea[readonly] { opacity: .7; }
 .istat { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 8px; }
 .istat b { font-size: 30px; }
 .istat span { color: var(--muted); font-size: 13px; }
+
+/* the card body clips overflow, so its first line must not be pulled up under the header */
+.cardbody > .sub:first-child { margin-top: 0; }

@@ -310,4 +310,6 @@ export const FR: Record<string, string> = {
   "< 6 h": "< 6 h",
   "before 23:00": "avant 23h",
   "after 01:00": "après 1h",
+  "This file is only on the phone or app where you added it. Open Muhasaba there once so it uploads, then tap Retry here.": "Ce fichier est seulement sur le téléphone ou l'app où vous l'avez ajouté. Ouvrez Muhasaba là-bas pour qu'il s'envoie, puis touchez Réessayer ici.",
+  "Retry upload": "Réessayer l'envoi",
 };
