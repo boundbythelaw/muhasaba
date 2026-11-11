@@ -1013,6 +1013,8 @@ function formatLog(sh) {
   sh.setFrozenColumns(4);
   COLUMNS.forEach(([, , w], i) => sh.setColumnWidth(i + 1, w));
 
+  // Start from clean cells: after a column move, a column could keep the old column's look (e.g. a date format).
+  sh.getRange(2, 1, MAX_ROWS - 1, NCOL).clearFormat();
   const body = (key) => sh.getRange(2, col(key), MAX_ROWS - 1, 1);
   body("date").setNumberFormat("ddd d mmm yyyy");
   body("updated").setNumberFormat("d mmm, HH:mm").setFontColor("#8A86A6");
@@ -1034,7 +1036,9 @@ function formatLog(sh) {
   sh.getRange(2, col("preview"), MAX_ROWS - 1, 4).insertCheckboxes();
   sh.getRange(2, col("slip"), MAX_ROWS - 1, 3).insertCheckboxes();
   body("sleepH").setNumberFormat("0.#").setHorizontalAlignment("center");
-  ["energy", "mood", "excused", "revised"].forEach((k) => body(k).setHorizontalAlignment("center"));
+  ["energy", "mood", "excused", "revised"].forEach((k) => body(k).setHorizontalAlignment("center").setNumberFormat("0"));
+  ["energy", "mood"].forEach((k) => body(k).setNumberFormat('0"/5"'));
+  ["phone", "reasons", "revRanges"].forEach((k) => body(k).setNumberFormat("@"));
   ["slept", "woke"].forEach((k) => body(k).setNumberFormat("HH:mm").setHorizontalAlignment("center"));
   ["reasons", "revRanges"].forEach((k) => body(k).setWrap(true));
 
