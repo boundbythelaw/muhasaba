@@ -5,12 +5,14 @@ import { useEffect, useState, type ReactNode } from "react";
 import { STEP_GOAL } from "@/lib/constants";
 import { longDate } from "@/lib/dates";
 import { haptic, subscribeAsk, toast, type AskRequest } from "@/lib/fx";
+import { useBackClose } from "@/lib/fx";
 import { countWords, UNLOCK_MINUTES, UNLOCK_WORDS } from "@/lib/guard";
 import { useStore } from "@/lib/store";
 import { tap } from "./ui";
 
 /* ---------- Bottom sheet: slides up, drag down or tap outside to close ---------- */
 export function BottomSheet({ open, onClose, children, label }: { open: boolean; onClose: () => void; children: ReactNode; label: string }) {
+  useBackClose(open, onClose);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };

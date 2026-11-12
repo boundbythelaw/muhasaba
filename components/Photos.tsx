@@ -2,7 +2,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { haptic, toast } from "@/lib/fx";
+import { haptic, toast, useBackClose } from "@/lib/fx";
 import { tr } from "@/lib/i18n";
 import {
   compress, deletePhoto, fmtDur, ingestVideo, MAX_PHOTOS, MAX_REC_SECONDS, newPhotoId, posterId, putPhoto, recMime, usePhotoUrl,
@@ -211,10 +211,12 @@ function VideoRecorder({ date, onClose, onDone }: { date: string; onClose: () =>
     }
   };
   const close = () => { stop(); stopStream(); onClose(); };
+  useBackClose(true, close);
 
   if (typeof document === "undefined") return null;
   return createPortal(
     <motion.div className="recorder" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} role="dialog" aria-label={tr("Record a video")}>
+      {state !== "rec" && <button className="lbx" onClick={close} aria-label={tr("Close")}>×</button>}
       <div className="recview">
         {state === "review" || state === "saving"
           ? result && <video key="review" src={result.url} controls playsInline autoPlay />
@@ -329,6 +331,7 @@ export function Lightbox({ photos, index, caption, onClose, onRemove }: {
   const [i, setI] = useState(index);
   const p = photos[Math.min(i, photos.length - 1)];
   const { photoUp, retryPhoto } = useStore();
+  useBackClose(true, onClose);
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); if (e.key === "ArrowRight") setI((x) => Math.min(x + 1, photos.length - 1)); if (e.key === "ArrowLeft") setI((x) => Math.max(x - 1, 0)); };
     addEventListener("keydown", k);
@@ -344,6 +347,7 @@ export function Lightbox({ photos, index, caption, onClose, onRemove }: {
     : photoUp.failed[p.id] || tr("Waiting to upload");
   return createPortal(
     <motion.div className="lightbox" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} role="dialog" aria-label={isVid ? tr("Video") : tr("Photo")}>
+      <button className="lbx" onClick={(e) => { e.stopPropagation(); onClose(); }} aria-label={tr("Close")}>×</button>
       <motion.div className="lbframe" drag={isVid ? false : "x"} dragConstraints={{ left: 0, right: 0 }} dragElastic={0.4}
         onDragEnd={(_, info) => { if (info.offset.x < -60) setI((x) => Math.min(x + 1, photos.length - 1)); else if (info.offset.x > 60) setI((x) => Math.max(x - 1, 0)); }}
         onClick={(e) => e.stopPropagation()}>

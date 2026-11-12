@@ -7,6 +7,7 @@ import { haptic, toast } from "@/lib/fx";
 import { fmt } from "@/lib/scoring";
 import { useStore } from "@/lib/store";
 import TimerBar from "./TimerBar";
+import { Disclose } from "./ui";
 import { CardShell, Pill, tap } from "./ui";
 
 export default function WorkCard() {
@@ -21,6 +22,7 @@ export default function WorkCard() {
       <p className="sub">{tr("1h = 8 · 2h = 14 · 3h+ = 20")}</p>
 
       {(isToday || running) && (
+        <Disclose label={running ? tr("⏱ Focus session running") : tr("⏱ Focus timer")} open={!!running}>
         <TimerBar
           start={running?.start ?? null}
           idleText="Start a focus session. Pick a topic below first."
@@ -38,6 +40,7 @@ export default function WorkCard() {
             toast(hrs ? tr("{h}h added to MuslimPreneur.", { h: hrs }) : tr("Under 8 minutes, nothing added."));
           }}
         />
+        </Disclose>
       )}
 
       <div className="stepper">

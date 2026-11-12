@@ -10,10 +10,8 @@ import type { Difficulty, QuranLog } from "@/lib/types";
 import TimerBar from "./TimerBar";
 import { CardShell, CheckRow, Pill, Segmented, tap } from "./ui";
 import { useEffect, useMemo, useState } from "react";
-import { clampRange, revisionStatus, STALE_DAYS } from "@/lib/revision";
-import { revPages } from "@/lib/scoring";
-import { revBonus } from "@/lib/bonus";
-import { Bar } from "./ui";
+import { murajaaPlan, rangeOf } from "@/lib/murajaa";
+import { Disclose } from "./ui";
 
 export default function QuranCard() {
   const { day, days, prefs, cur, scores, update, timers, setTimers } = useStore();
@@ -41,6 +39,7 @@ export default function QuranCard() {
       </div>
 
       {(isToday || running) && (
+        <Disclose label={running ? tr("⏱ Timer running") : tr("⏱ Time your ḥifẓ")} open={!!running}>
         <TimerBar
           start={running?.start ?? null}
           idleText="Time your memorisation. It fills in the minutes for you."
@@ -55,6 +54,7 @@ export default function QuranCard() {
             toast(tr("{m} min logged. Switch to 1 page if you only got one.", { m }));
           }}
         />
+        </Disclose>
       )}
 
       <div className="lab">{tr("Memorised today?")}</div>
@@ -92,17 +92,12 @@ export default function QuranCard() {
 
       <div className="checks">
         <CheckRow on={q.preview} title={tr("Previewed tomorrow's pages")} sub={tr("Pages {a}–{b}", { a: po.previewFrom, b: po.previewTo })} points={5} onToggle={toggle("preview")} />
-        <CheckRow on={q.juz} title={tr("Read 1 juz")} sub={tr("Daily recitation")} points={5} onToggle={toggle("juz")} />
+        <MurajaaRow />
         <CheckRow on={q.mulkSubh} title={tr("Sūrat al-Mulk after Subh")} points={2.5} onToggle={toggle("mulkSubh")} />
         <CheckRow on={q.mulkMaghrib} title={tr("Sūrat al-Mulk after Maghrib")} points={2.5} onToggle={toggle("mulkMaghrib")} />
       </div>
 
-      <Murajaa />
-
-      <div className="ch">
-        <div className="lab">{tr("Your Mushaf")} · {po.done}/{MUSHAF_PAGES}</div>
-        <div className="lab num">{((po.done / MUSHAF_PAGES) * 100).toFixed(1)}%</div>
-      </div>
+      <Disclose label={`${tr("Your Mushaf")} · ${po.done}/${MUSHAF_PAGES} · ${((po.done / MUSHAF_PAGES) * 100).toFixed(1)}%`}>
       <div className="juz">
         {Array.from({ length: 30 }, (_, i) => {
           const j = i + 1, f = juzFill(j, po.done);
@@ -126,60 +121,49 @@ export default function QuranCard() {
           ? <>{tr("At 2 pages a day you'll complete the Mushaf around")} <b>{finish.toLocaleDateString(loc(), { month: "long", year: "numeric" })}</b>{tr(", in shāʾ Allāh.")}</>
           : tr("Mushaf complete. Al-ḥamdu lillāh.")}
       </p>
+      </Disclose>
     </CardShell>
   );
 }
 
-/** Murājaʿa: log the pages you revised today, and see which memorised pages are getting old. */
-function Murajaa() {
-  const { day, days, prefs, cur, update, locked, requestUnlock } = useStore();
-  const st = useMemo(() => revisionStatus(days, prefs, cur), [days, prefs, cur]);
-  const [a, setA] = useState("");
-  const [b, setB] = useState("");
-  const today = revPages(day.rev);
-  const add = (from: number, to: number) => {
-    if (locked) { requestUnlock(cur); return; }
-    const r = clampRange(from, to);
-    if (!r) return;
-    void update((d) => { d.rev.push(r); }, null, true, { noConfirm: true }).then((ok) => {
-      if (ok) { setA(""); setB(""); haptic(10); toast(tr("{n} pages revised. Bārak Allāhu fīk.", { n: r.to - r.from + 1 })); }
-    });
-  };
-  const pct = st.memorised ? (st.fresh / st.memorised) * 100 : 0;
+/**
+ * Murājaʿa: one juz a day over your memorised pages, in order, then back to juz 1.
+ * Ticking it counts as the daily juz (+5); the juz you read sets tomorrow's.
+ */
+function MurajaaRow() {
+  const { day, days, prefs, cur, update } = useStore();
+  const plan = useMemo(() => murajaaPlan(days, prefs, cur), [days, prefs, cur]);
+  const [pick, setPick] = useState(false);
+  const q = day.quran;
+  if (!plan.lastJuz) {
+    return <CheckRow on={q.juz} title={tr("Murājaʿa · read 1 juz")} sub={tr("Daily revision")} points={5}
+      onToggle={(e) => update((d) => { d.quran.juz = !d.quran.juz; }, e)} />;
+  }
+  const r = plan.range!;
+  const set = (j: number, on: boolean, e: React.MouseEvent | null) => update((d) => {
+    d.quran.juz = on;
+    if (on) { const x = rangeOf(j, plan.memorised); d.quran.revJuz = j; d.rev = [{ from: x.from, to: x.to }]; }
+    else { delete d.quran.revJuz; d.rev = []; }
+  }, e);
   return (
-    <div className="murajaa">
-      <div className="ch">
-        <div className="lab">{tr("Murājaʿa · revision")} <span className="ar" style={{ fontSize: 15 }}>مراجعة</span></div>
-        <div className="lab num">{today ? `${today}p · +${Math.round(revBonus(day) * 10) / 10} ✦` : tr("bonus ✦")}</div>
-      </div>
-      <Bar pct={pct} max={st.stale === 0 && st.memorised > 0} />
-      <p className="note">
-        {st.memorised === 0 ? tr("Pages you memorise will show up here.")
-          : st.stale === 0 ? tr("Every memorised page was revised in the last {d} days. Mā shāʾ Allāh.", { d: STALE_DAYS })
-          : tr("{s} of {m} memorised pages not revised in the last {d} days.", { s: st.stale, m: st.memorised, d: STALE_DAYS })}
-      </p>
-      {st.next && (
-        <motion.button className="revnext" {...tap} onClick={() => add(st.next!.from, st.next!.to)}>
-          <span><small>{tr("Next to revise")}</small><b className="num">{tr("Pages {a}–{b}", { a: st.next.from, b: st.next.to })}</b></span>
-          <em>{tr("I revised these")}</em>
-        </motion.button>
-      )}
-      <div className="revadd">
-        <input className="inp num" type="number" inputMode="numeric" placeholder={tr("from")} aria-label={tr("From page")} value={a} onChange={(e) => setA(e.target.value)} />
-        <span>–</span>
-        <input className="inp num" type="number" inputMode="numeric" placeholder={tr("to")} aria-label={tr("To page")} value={b} onChange={(e) => setB(e.target.value)} />
-        <motion.button className="btn" {...tap} disabled={!a} onClick={() => add(Number(a), Number(b || a))}>{tr("Add")}</motion.button>
-      </div>
-      {day.rev.length > 0 && (
-        <div className="row revlist">
-          {day.rev.map((r, i) => (
-            <span className="revchip num" key={`${r.from}-${r.to}-${i}`}>
-              {r.from === r.to ? `p. ${r.from}` : `p. ${r.from}–${r.to}`}
-              <button aria-label={tr("Remove")} onClick={() => update((d) => { d.rev.splice(i, 1); }, null)}>×</button>
-            </span>
-          ))}
-        </div>
-      )}
+    <div className="murajaa2">
+      <CheckRow on={q.juz}
+        title={tr("Murājaʿa · Juz {j}", { j: plan.juz })}
+        sub={`${r.surahs[0]}${r.partial ? "" : ` → ${r.surahs[1]}`} · ${tr("pages {a}–{b}", { a: r.from, b: r.to })}${r.partial ? ` (${tr("memorised part")})` : ""}`}
+        points={5} onToggle={(e) => set(plan.juz, !q.juz, e)} />
+      <button className="linkbtn" onClick={() => setPick((x) => !x)}>
+        {pick ? tr("Close") : tr("Read a different juz?")}
+      </button>
+      <AnimatePresence initial={false}>
+        {pick && (
+          <motion.div className="juzpick" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>
+            {Array.from({ length: plan.lastJuz }, (_, i) => i + 1).map((j) => (
+              <motion.button key={j} {...tap} className={j === plan.juz ? "on" : ""} onClick={(e) => { void set(j, true, e); setPick(false); haptic(8); }}>{j}</motion.button>
+            ))}
+            <p className="note">{tr("Tomorrow continues from the juz you pick. Your cycle: juz 1 to {n}, then again.", { n: plan.lastJuz })}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

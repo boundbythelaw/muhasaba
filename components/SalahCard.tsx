@@ -31,6 +31,7 @@ export default function SalahCard() {
   const live = isToday && times ? currentPrayer(times, now) : null;
   const next = isToday && times ? PRAYERS.find(({ id }) => times![id].getTime() > now.getTime())?.id : undefined;
   const tz = prefs.prayerLoc.tz;
+  const [ask, setAsk] = useState<PrayerId | null>(null);
 
   return (
     <CardShell id="sec-p" title="Salah" ar="الصلاة" value={scores.p} max={40} done={scores.p >= 40} summary={tr("All five in jamāʿah before the takbīr")}>
@@ -51,6 +52,8 @@ export default function SalahCard() {
         </div>
       </div>
 
+      <WhySheet id={ask} onClose={() => setAsk(null)} />
+
       {PRAYERS.map(({ id, en, ar }) => {
         const at = times?.[id];
         const isLive = live === id, isNext = next === id;
@@ -70,10 +73,12 @@ export default function SalahCard() {
               <span className="par">{ar}</span>
             </motion.button>
             <Segmented ariaLabel={tr(en)} options={OPTIONS} value={day.prayers[id]}
-              onSelect={(v, e) => update((d) => { if (d.prayers[id] === v) { delete d.prayers[id]; delete d.why[id]; } else { d.prayers[id] = v; if (v === 2) delete d.why[id]; } }, e)} />
-            <AnimatePresence initial={false}>
-              {(day.prayers[id] === 0 || day.prayers[id] === 1 || day.why[id]) && <WhyRow id={id} />}
-            </AnimatePresence>
+              onSelect={(v, e) => {
+                const was = day.prayers[id];
+                void update((d) => { if (d.prayers[id] === v) { delete d.prayers[id]; delete d.why[id]; } else { d.prayers[id] = v; if (v === 2) delete d.why[id]; } }, e)
+                  .then((ok) => { if (ok && was !== v && v !== 2 && !day.why[id]) setAsk(id); });
+              }} />
+            {(day.prayers[id] === 0 || day.prayers[id] === 1 || day.why[id]) && <WhyPill id={id} onOpen={() => setAsk(id)} />}
           </div>
         );
       })}
@@ -91,45 +96,70 @@ export default function SalahCard() {
 }
 
 /* ---------- Why late / not at the mosque ---------- */
-function WhyRow({ id }: { id: PrayerId }) {
-  const { day, update, prefs } = useStore();
+
+/** One small line under the prayer: the reason picked (tap to change), or a link to add one. */
+function WhyPill({ id, onOpen }: { id: PrayerId; onOpen: () => void }) {
+  const { day } = useStore();
   const w = day.why[id];
   const r = reasonOf(w?.r);
+  return (
+    <button className={`whypill ${r?.excuse ? (excused(w) ? "ex" : "exq") : r ? "set" : ""}`} onClick={() => { onOpen(); haptic(5); }}>
+      {r ? <>{tr("Why")}: <b>{tr(r.label)}</b>{r.excuse ? (excused(w) ? ` · ${tr("excused")} ✓` : ` · ${tr("confirm")}…`) : ""}</> : <>+ {tr("Add a reason")}</>}
+    </button>
+  );
+}
+
+/** The popup that asks why, right after you mark a prayer "late" or "no mosque". */
+function WhySheet({ id, onClose }: { id: PrayerId | null; onClose: () => void }) {
+  const { day, update, prefs } = useStore();
+  const p = PRAYERS.find((x) => x.id === id);
+  const w = id ? day.why[id] : undefined;
+  const r = reasonOf(w?.r);
   const list = REASONS.filter((x) => !x.women || prefs.gender === "f");
-  const set = (rid: (typeof REASONS)[number]["id"]) => update((d) => {
+  const set = (rid: (typeof REASONS)[number]["id"]) => id && update((d) => {
     if (d.why[id]?.r === rid) delete d.why[id];
     else d.why[id] = { r: rid, ok: rid === "period" ? true : undefined };
   }, null, true, { noConfirm: true });
   return (
-    <motion.div className="whyrow" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>
-      <div className="whychips">
-        <span className="whylab">{tr("Why?")}</span>
-        {list.map((x) => (
-          <motion.button key={x.id} {...tap} className={`whychip ${x.excuse ? "ex" : ""} ${w?.r === x.id ? "on" : ""}`} onClick={() => { set(x.id); haptic(6); }}>
-            {tr(x.label)}
-          </motion.button>
-        ))}
-      </div>
-      <AnimatePresence initial={false}>
-        {r?.excuse && (
-          <motion.div className="whyok" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>
-            {r.okLabel ? (
-              <motion.button {...tap} className={`whytick ${w?.ok ? "on" : ""}`}
-                onClick={(e) => update((d) => { const x = d.why[id]; if (x) x.ok = !x.ok; }, e, false, { noConfirm: true })}>
-                <i>{w?.ok ? "✓" : ""}</i><span>{tr(r.okLabel)}</span><b>{w?.ok ? tr("Excused · 8") : "+8"}</b>
-              </motion.button>
-            ) : (
-              <p className="note">{tr("You're not required to pray. It counts as full, in shāʾ Allāh.")}</p>
+    <BottomSheet open={!!id} onClose={onClose} label={tr("Why?")}>
+      {id && p && (
+        <div className="sheet-body">
+          <h3>{day.prayers[id] === 1 ? tr("Why were you late for {p}?", { p: tr(p.en) }) : tr("Why weren't you at the mosque for {p}?", { p: tr(p.en) })}</h3>
+          <div className="lab">{tr("Valid excuses")}</div>
+          <div className="whychips">
+            {list.filter((x) => x.excuse).map((x) => (
+              <motion.button key={x.id} {...tap} className={`whychip ex ${w?.r === x.id ? "on" : ""}`} onClick={() => { set(x.id); haptic(6); }}>{tr(x.label)}</motion.button>
+            ))}
+          </div>
+          <AnimatePresence initial={false}>
+            {r?.excuse && (
+              <motion.div className="whyok" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>
+                {r.okLabel ? (
+                  <motion.button {...tap} className={`whytick ${w?.ok ? "on" : ""}`}
+                    onClick={(e) => update((d) => { const x = d.why[id]; if (x) x.ok = !x.ok; }, e, false, { noConfirm: true })}>
+                    <i>{w?.ok ? "✓" : ""}</i><span>{tr(r.okLabel)}</span><b>{w?.ok ? tr("Excused · 8") : "+8"}</b>
+                  </motion.button>
+                ) : (
+                  <p className="note">{tr("You're not required to pray. It counts as full, in shāʾ Allāh.")}</p>
+                )}
+                {(w?.r === "travel" || w?.r === "period" || w?.r === "ill") && excused(w) && (
+                  <motion.button {...tap} className="linkbtn" onClick={(e) => update((d) => {
+                    for (const q of PRAYERS) { if (d.prayers[q.id] !== 2) { d.why[q.id] = { ...w! }; if (d.prayers[q.id] == null) d.prayers[q.id] = 0; } }
+                  }, e, false, { noConfirm: true })}>{tr("Same for all of today's prayers")}</motion.button>
+                )}
+              </motion.div>
             )}
-            {(w?.r === "travel" || w?.r === "period" || w?.r === "ill") && excused(w) && (
-              <motion.button {...tap} className="linkbtn" onClick={(e) => update((d) => {
-                for (const p of PRAYERS) { if (d.prayers[p.id] !== 2) { d.why[p.id] = { ...w! }; if (d.prayers[p.id] == null) d.prayers[p.id] = 0; } }
-              }, e, false, { noConfirm: true })}>{tr("Same for all of today's prayers")}</motion.button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+          </AnimatePresence>
+          <div className="lab">{tr("Other reasons")}</div>
+          <div className="whychips">
+            {list.filter((x) => !x.excuse).map((x) => (
+              <motion.button key={x.id} {...tap} className={`whychip ${w?.r === x.id ? "on" : ""}`} onClick={() => { set(x.id); haptic(6); }}>{tr(x.label)}</motion.button>
+            ))}
+          </div>
+          <motion.button className="btn big" {...tap} onClick={onClose}>{w ? tr("Done") : tr("Skip")}</motion.button>
+        </div>
+      )}
+    </BottomSheet>
   );
 }
 

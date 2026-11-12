@@ -60,7 +60,6 @@ export function bonusList(d: DayLog) {
   const out = BONUS_ITEMS.filter((it) => d.bonus[it.id]).map((it) => it.label);
   const r = rakatDone(d.bonus);
   if (r) out.push(`Rawātib ${r}/12`);
-  const rv = revCount(d);
-  if (rv) out.push(`Murājaʿa ${rv}p`);
+
   return out.join(", ");
 }

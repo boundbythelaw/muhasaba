@@ -10,7 +10,10 @@ export interface QuranLog {
   minutes: number | null;
   diff: Difficulty | null;
   preview: boolean;
+  /** Murājaʿa done: today's juz read (+5). */
   juz: boolean;
+  /** Which juz the murājaʿa covered; tomorrow's suggestion continues from it. */
+  revJuz?: number;
   mulkSubh: boolean;
   mulkMaghrib: boolean;
 }

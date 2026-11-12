@@ -64,7 +64,7 @@ export const reasonOf = (id?: string) => REASONS.find((r) => r.id === id);
 
 /** Bonus: murājaʿa, 1 point per 4 pages revised, up to 5 (one juz). */
 export const REV_PTS_PER_PAGE = 0.25;
-export const REV_PTS_MAX = 5;
+export const REV_PTS_MAX = 0; // murājaʿa now scores inside the Qur'an card (the juz, +5)
 
 export const STORAGE_KEY = "muhasaba-v1";
 export const THEME_KEY = "muhasaba-theme";

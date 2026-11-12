@@ -140,3 +140,23 @@ export function CardShell({ id, title, ar, value, max, done, summary, children, 
     </motion.section>
   );
 }
+
+/** A small "show more" row that keeps secondary things (timers, maps) out of the way until tapped. */
+export function Disclose({ label, open: initial = false, children }: { label: string; open?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(initial);
+  return (
+    <div className={`disclose ${open ? "open" : ""}`}>
+      <button type="button" className="disclose-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span>{label}</span>
+        <motion.svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" animate={{ rotate: open ? 180 : 0 }}><path d="m6 9 6 6 6-6" /></motion.svg>
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div className="disclose-body" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

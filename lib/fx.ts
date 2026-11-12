@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useRef } from "react";
 import confetti from "canvas-confetti";
 
 /** Tiny pub-sub so any component can trigger floating points and toasts rendered by <FxLayer/>. */
@@ -80,4 +81,27 @@ export function ask(opts: AskOpts): Promise<boolean> {
     const req = { ...opts, id: nextId++, resolve };
     askListeners.forEach((l) => l(req));
   });
+}
+
+
+/**
+ * While something full-screen is open, the phone's Back gesture closes it instead of leaving the app.
+ * Mount it only while open (or pass `open`).
+ */
+export function useBackClose(open: boolean, onClose: () => void) {
+  const ref = useRef(onClose);
+  ref.current = onClose;
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return;
+    const tag = "muhasaba-" + Math.random().toString(36).slice(2);
+    history.pushState({ overlay: tag }, "");
+    let popped = false;
+    // A pop that lands back on our own entry came from a sheet opened on top of us closing: ignore it.
+    const pop = () => { if (history.state?.overlay === tag) return; popped = true; ref.current(); };
+    addEventListener("popstate", pop);
+    return () => {
+      removeEventListener("popstate", pop);
+      if (!popped && history.state?.overlay === tag) history.back();
+    };
+  }, [open]);
 }
