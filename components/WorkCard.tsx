@@ -18,15 +18,15 @@ export default function WorkCard() {
   const isToday = cur === todayKey();
 
   return (
-    <CardShell id="sec-w" title={tr("MuslimPreneur")} value={scores.w} max={20} done={scores.w >= 20} summary={`${fmt(hv)}h${w.topics.length ? " · " + w.topics.map((x) => tr(x)).join(", ") : ""}`}>
-      <p className="sub">{tr("1h = 8 · 2h = 14 · 3h+ = 20")}</p>
+    <CardShell id="sec-w" title={tr("Productivity")} ar="الإنتاج" value={scores.w} max={20} done={scores.w >= 20} summary={`${fmt(hv)}h${w.topics.length ? " · " + w.topics.map((x) => tr(x)).join(", ") : ""}`}>
+      <p className="sub">{tr("Work, learning the dīn, studies, skills, helping family: anything that moves you forward. 1h = 8 · 2h = 14 · 3h+ = 20")}</p>
 
       {(isToday || running) && (
         <Disclose label={running ? tr("⏱ Focus session running") : tr("⏱ Focus timer")} open={!!running}>
         <TimerBar
           start={running?.start ?? null}
           idleText="Start a focus session. Pick a topic below first."
-          runText={tr("Deep work on {x}…", { x: running?.topic ? tr(running.topic) : "MuslimPreneur" })}
+          runText={tr("Deep work on {x}…", { x: running?.topic ? tr(running.topic) : tr("something productive") })}
           startLabel="Start" stopLabel="Stop"
           onStart={() => { setTimers((t) => ({ ...t, work: { day: cur, start: Date.now(), topic: w.topics[0] ?? "" } })); haptic(15); toast(tr("Focus session started. Phone face down.")); }}
           onStop={(e) => {
@@ -37,7 +37,7 @@ export default function WorkCard() {
               d.work.hours = Math.min(14, (d.work.hours || 0) + hrs);
               if (tm?.topic && !d.work.topics.includes(tm.topic)) d.work.topics.push(tm.topic);
             }, e, false, { noConfirm: true });
-            toast(hrs ? tr("{h}h added to MuslimPreneur.", { h: hrs }) : tr("Under 8 minutes, nothing added."));
+            toast(hrs ? tr("{h}h of productive time added.", { h: hrs }) : tr("Under 8 minutes, nothing added."));
           }}
         />
         </Disclose>
@@ -57,7 +57,7 @@ export default function WorkCard() {
         </div>
       </div>
 
-      <div className="lab">{tr("What did you work on?")}</div>
+      <div className="lab">{tr("What was productive today?")}</div>
       <div className="row">
         {TOPICS.map((t) => (
           <Pill key={t} on={w.topics.includes(t)} onClick={() => {
@@ -68,7 +68,7 @@ export default function WorkCard() {
           }}>{tr(t)}</Pill>
         ))}
       </div>
-      <textarea aria-label={tr("Work notes")} readOnly={locked} onFocus={() => { if (locked) requestUnlock(cur); }} placeholder={tr("What moved forward? e.g. 20 cold emails sent, homepage copy rewritten")}
+      <textarea aria-label={tr("Work notes")} readOnly={locked} onFocus={() => { if (locked) requestUnlock(cur); }} placeholder={tr("What did you do? e.g. finished the school website, read 30 pages of the Seerah")}
         value={w.note} onChange={(e) => { const v = e.target.value.slice(0, 2000); update((d) => { d.work.note = v; }, null, true); }} />
     </CardShell>
   );

@@ -69,7 +69,7 @@ const Ctx = createContext<StoreValue | null>(null);
 const CELEBRATE: Record<Pillar, string> = {
   p: "All five prayers in jamāʿah before the takbīr ✦",
   q: "Qur'an section complete. Mā shāʾ Allāh.",
-  w: "3 hours on MuslimPreneur. Full marks.",
+  w: "3 productive hours. Full marks.",
   s: "Walk target smashed.",
 };
 

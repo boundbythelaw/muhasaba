@@ -1,7 +1,7 @@
 "use client";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import { PRAYERS, REASONS, reasonOf, type PrayerId } from "@/lib/constants";
+import { isJumuah, prayerName, PRAYERS, REASONS, reasonOf, type PrayerId } from "@/lib/constants";
 import { excused } from "@/lib/scoring";
 import { todayKey } from "@/lib/dates";
 import { haptic, toast } from "@/lib/fx";
@@ -16,6 +16,12 @@ const OPTIONS = [
   { value: 0 as PrayerMark, label: "No mosque", sub: "0", tone: "bad" as const },
   { value: 1 as PrayerMark, label: "Mosque", sub: "late · 4" },
   { value: 2 as PrayerMark, label: "Before takbīr", sub: "8", tone: "top" as const },
+];
+/** Friday: the virtue is being there before the imam climbs the minbar. */
+const JUMUAH_OPTIONS = [
+  { value: 0 as PrayerMark, label: "Missed it", sub: "Dhuhr · 0", tone: "bad" as const },
+  { value: 1 as PrayerMark, label: "Late", sub: "khuṭbah began · 4" },
+  { value: 2 as PrayerMark, label: "Before the khuṭbah", sub: "8", tone: "top" as const },
 ];
 
 export default function SalahCard() {
@@ -54,7 +60,9 @@ export default function SalahCard() {
 
       <WhySheet id={ask} onClose={() => setAsk(null)} />
 
-      {PRAYERS.map(({ id, en, ar }) => {
+      {PRAYERS.map(({ id }) => {
+        const { en, ar } = prayerName(id, cur, prefs.gender);
+        const jumuah = isJumuah(id, cur, prefs.gender);
         const at = times?.[id];
         const isLive = live === id, isNext = next === id;
         const missed = isToday && at && at.getTime() < now.getTime() && day.prayers[id] == null && !isLive;
@@ -72,7 +80,7 @@ export default function SalahCard() {
               </span>
               <span className="par">{ar}</span>
             </motion.button>
-            <Segmented ariaLabel={tr(en)} options={OPTIONS} value={day.prayers[id]}
+            <Segmented ariaLabel={tr(en)} options={jumuah ? JUMUAH_OPTIONS : OPTIONS} value={day.prayers[id]}
               onSelect={(v, e) => {
                 const was = day.prayers[id];
                 void update((d) => { if (d.prayers[id] === v) { delete d.prayers[id]; delete d.why[id]; } else { d.prayers[id] = v; if (v === 2) delete d.why[id]; } }, e)
@@ -111,8 +119,8 @@ function WhyPill({ id, onOpen }: { id: PrayerId; onOpen: () => void }) {
 
 /** The popup that asks why, right after you mark a prayer "late" or "no mosque". */
 function WhySheet({ id, onClose }: { id: PrayerId | null; onClose: () => void }) {
-  const { day, update, prefs } = useStore();
-  const p = PRAYERS.find((x) => x.id === id);
+  const { day, update, prefs, cur } = useStore();
+  const p = id ? prayerName(id, cur, prefs.gender) : null;
   const w = id ? day.why[id] : undefined;
   const r = reasonOf(w?.r);
   const list = REASONS.filter((x) => !x.women || prefs.gender === "f");

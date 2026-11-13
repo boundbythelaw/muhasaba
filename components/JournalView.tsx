@@ -27,7 +27,7 @@ const DRAFT_KEY = "muhasaba-journal-draft";
 function prompts(): string[] {
   const h = new Date().getHours();
   const list = h < 11 ? ["After Subh I…", "My memorisation this morning…", "Today I intend to…"]
-    : h < 16 ? ["This morning went…", "On MuslimPreneur I…", "Something that got in my way…"]
+    : h < 16 ? ["This morning went…", "Something productive I did…", "Something that got in my way…"]
     : h < 20 ? ["This afternoon…", "A small win today…", "I struggled with…"]
     : ["Looking back on today…", "What I'm proud of…", "Tomorrow I want to…"];
   return list.map((p) => tr(p));

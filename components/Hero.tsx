@@ -2,11 +2,11 @@
 import { tr } from "@/lib/i18n";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { useState } from "react";
-import { MAX, PILLAR_NAME, PRAYERS, STEP_GOAL, type Pillar } from "@/lib/constants";
+import { MAX, PILLAR_NAME, prayerName, PRAYERS, STEP_GOAL, type Pillar, type PrayerId } from "@/lib/constants";
 import { getLang, getName, num } from "@/lib/i18n";
 import { fmtTime, nextPrayer, timesFor, untilText } from "@/lib/prayerTimes";
 import { useEffect } from "react";
-import { addDays, birthday, greeting, hijri, longDate, ordinal, todayKey } from "@/lib/dates";
+import { addDays, birthday, greeting, hijri, keyOf, longDate, ordinal, todayKey } from "@/lib/dates";
 import { burst, toast } from "@/lib/fx";
 import { checkinDone, fmt, grade, isMax, portion } from "@/lib/scoring";
 import type { DayLog, Scores } from "@/lib/types";
@@ -28,10 +28,10 @@ const SEGMENTS = (() => {
 })();
 
 /** The next few points worth earning, in the order of the day. */
-function nextUp(day: DayLog, scores: Scores, portionText: string, started: (id: string) => boolean): { text: string; pts: string; target: Pillar | "journal" | "c" } {
+function nextUp(day: DayLog, scores: Scores, portionText: string, started: (id: string) => boolean, nameOf: (id: PrayerId) => string): { text: string; pts: string; target: Pillar | "journal" | "c" } {
   // Only prayers whose time has already come are worth logging now.
   const firstPrayer = PRAYERS.find(({ id }) => day.prayers[id] == null && started(id));
-  if (firstPrayer) return { text: tr("Log {p}", { p: tr(firstPrayer.en) }), pts: tr("up to +8"), target: "p" };
+  if (firstPrayer) return { text: tr("Log {p}", { p: tr(nameOf(firstPrayer.id)) }), pts: tr("up to +8"), target: "p" };
   // After Maghrib, the required check-in comes first.
   if (started("maghrib") && !checkinDone(day.checkin)) return { text: tr("Evening check-in"), pts: tr("required"), target: "c" };
   if (day.quran.mem < 2) return { text: tr("Memorise {x}", { x: portionText }), pts: day.quran.mem ? "+8" : "+15", target: "q" };
@@ -39,7 +39,7 @@ function nextUp(day: DayLog, scores: Scores, portionText: string, started: (id: 
   if (!day.quran.juz) return { text: tr("Read your juz"), pts: "+5", target: "q" };
   if (!day.quran.preview) return { text: tr("Preview tomorrow's pages"), pts: "+5", target: "q" };
   if (!day.quran.mulkMaghrib) return { text: tr("Al-Mulk after Maghrib"), pts: "+2.5", target: "q" };
-  if (scores.w < 20) return { text: tr("Deep work on MuslimPreneur"), pts: `+${fmt(20 - scores.w)}`, target: "w" };
+  if (scores.w < 20) return { text: tr("Productive time"), pts: `+${fmt(20 - scores.w)}`, target: "w" };
   if (scores.s < 10) return { text: tr("Walk {n} more steps", { n: num(STEP_GOAL - (day.steps ?? 0)) }), pts: `+${fmt(10 - scores.s)}`, target: "s" };
   if (!checkinDone(day.checkin)) return { text: tr("Evening check-in"), pts: tr("required"), target: "c" };
   return { text: tr("Everything's done. Write about your day"), pts: "✎", target: "journal" };
@@ -51,7 +51,7 @@ export default function Hero({ onJump }: { onJump: (p: Pillar | "journal" | "c")
   const isTodayKey = cur === todayKey();
   let times: Record<string, Date> | null = null;
   try { times = timesFor(cur, prefs.prayerLoc, prefs.asr); } catch { times = null; }
-  const nu = nextUp(day, scores, tr("pages {a}–{b}", { a: po.from, b: po.to }), (id) => !isTodayKey || !times || times[id].getTime() <= Date.now());
+  const nu = nextUp(day, scores, tr("pages {a}–{b}", { a: po.from, b: po.to }), (id) => !isTodayKey || !times || times[id].getTime() <= Date.now(), (id) => prayerName(id, cur, prefs.gender).en);
   const [hintSeen, setHintSeen] = useState(false);
   const t = todayKey();
   const isToday = cur === t;
@@ -163,7 +163,7 @@ function NextPrayerChip({ onOpen }: { onOpen: () => void }) {
   const t = todayKey();
   let np;
   try { np = nextPrayer(t, addDays(t, 1), prefs.prayerLoc, prefs.asr, now); } catch { return null; }
-  const name = PRAYERS.find((p) => p.id === np.id);
+  const name = prayerName(np.id, keyOf(np.at), prefs.gender);
   const ms = np.at.getTime() - now.getTime();
   const soon = ms < 15 * 60000;
   return (

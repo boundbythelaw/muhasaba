@@ -14,13 +14,18 @@ export const PRAYERS = [
 
 export type PrayerId = (typeof PRAYERS)[number]["id"];
 
+/** Anything productive, not only money: business, learning the dīn, studies, skills, helping family. */
 export const TOPICS = [
-  "Cold emailing",
-  "LinkedIn",
-  "Website",
-  "Outreach",
-  "Content",
-  "Sales calls",
+  "Business",
+  "Websites",
+  "Outreach & sales",
+  "Islamic knowledge",
+  "Seerah",
+  "Tafsīr",
+  "Studies",
+  "Reading",
+  "New skill",
+  "Family & helping",
   "Planning",
 ] as const;
 
@@ -30,7 +35,7 @@ export const STEP_SLIDER_MAX = 20000;
 
 export const MAX = { p: 40, q: 30, w: 20, s: 10 } as const;
 export type Pillar = keyof typeof MAX;
-export const PILLAR_NAME: Record<Pillar, string> = { p: "Salah", q: "Qur'an", w: "Work", s: "Walk" };
+export const PILLAR_NAME: Record<Pillar, string> = { p: "Salah", q: "Qur'an", w: "Productive", s: "Walk" };
 
 /** 127 pages memorised before 5 Nov 2026, so that day's portion is pages 128–129. */
 export const DEFAULT_PREFS: import("./types").Prefs = {
@@ -68,3 +73,13 @@ export const REV_PTS_MAX = 0; // murājaʿa now scores inside the Qur'an card (t
 
 export const STORAGE_KEY = "muhasaba-v1";
 export const THEME_KEY = "muhasaba-theme";
+
+
+/** Friday: Dhuhr becomes Jumuʿah (for brothers; sisters keep Dhuhr). `date` is "YYYY-MM-DD". */
+export const isFriday = (date: string) => new Date(date + "T12:00:00").getDay() === 5;
+export const isJumuah = (id: PrayerId, date: string, gender?: string) => id === "dhuhr" && isFriday(date) && gender !== "f";
+export function prayerName(id: PrayerId, date: string, gender?: string): { en: string; ar: string } {
+  if (isJumuah(id, date, gender)) return { en: "Jumuʿah", ar: "الجمعة" };
+  const p = PRAYERS.find((x) => x.id === id)!;
+  return { en: p.en, ar: p.ar };
+}

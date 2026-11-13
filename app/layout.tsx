@@ -9,7 +9,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Muhasaba",
-  description: "Mohamed's daily accountability: salah, Qur'an, MuslimPreneur and steps.",
+  description: "Mohamed's daily accountability: salah, Qur'an, productivity and steps.",
   applicationName: "Muhasaba",
   manifest: "/manifest.webmanifest",
   icons: { icon: "/icon.svg", apple: "/apple-touch-icon.png" },

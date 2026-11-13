@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Muhasaba · Mohamed",
     short_name: "Muhasaba",
-    description: "Daily accountability: salah, Qur'an, MuslimPreneur and steps.",
+    description: "Daily accountability: salah, Qur'an, productivity and steps.",
     start_url: "/",
     scope: "/",
     display: "standalone",

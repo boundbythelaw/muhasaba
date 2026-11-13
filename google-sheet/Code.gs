@@ -36,7 +36,7 @@ const COLUMNS = [
   ["Day type", "dayType", 124],
   ["Salah /40", "salah", 76],
   ["Qur'an /30", "quran", 80],
-  ["Work /20", "work", 72],
+  ["Productive /20", "work", 84],
   ["Walk /10", "walk", 70],
   ["Subh", "subh", 112],
   ["Dhuhr", "dhuhr", 112],
@@ -57,7 +57,7 @@ const COLUMNS = [
   ["Revision", "revRanges", 120],
   ["Hours", "hours", 60],
   ["Topics", "topics", 200],
-  ["What moved forward", "note", 280],
+  ["What was productive", "note", 280],
   ["Steps", "steps", 76],
   ["Slept", "slept", 62],
   ["Woke", "woke", 62],
@@ -75,7 +75,9 @@ const COLUMNS = [
   ["Last update", "updated", 140],
 ];
 /** Bumped whenever COLUMNS change. The app re-sends every day when it sees a new number. */
-const SCHEMA = 2;
+const SCHEMA = 3;
+/** Old header names, so a renamed column keeps its data when the Log is migrated. */
+const HEADER_ALIASES = { "Productive /20": ["Work /20"], "Hours": [], "Topics": [], "What was productive": ["What moved forward"] };
 const INSIGHTS = "Insights";
 /** Local hour (in the app's time zone) for the nightly reminder email, and the weekly letter on Sunday. */
 const REMIND_HOUR = 22;
@@ -483,11 +485,15 @@ function aiProvider() {
 
 function buildPrompt(entries, shukr, meta) {
   return [
-    "You edit the private daily journal of Mohamed Diallo, 20, a young Muslim who is memorising the Qur'an and building a business called MuslimPreneur.",
-    "He types quickly on his phone and makes mistakes. For each entry:",
-    "- Fix spelling, grammar and punctuation, and make it read clearly and naturally.",
-    "- Keep his voice, first person, his meaning and every fact. Never add events, feelings or details he did not write.",
-    "- Keep the language he wrote in (English, French or mixed). Keep Islamic terms as he uses them (Subh, Dhuhr, Asr, Maghrib, Isha, takbīr, juz, hifz, in shā' Allāh, al-ḥamdu lillāh).",
+    "You edit the private daily journal of Mohamed Diallo, 20, a young Muslim who is memorising the Qur'an, building his business and trying to make every day productive.",
+    "He types fast on his phone or speaks voice notes that were transcribed by a machine, so entries contain typos, run-on sentences, filler words and repeated words or phrases (transcription often repeats a word or a whole phrase several times).",
+    "For each entry, write the clean version of exactly what he said:",
+    "- Remove every repetition: stuttered or doubled words, phrases said twice, the same idea restated in a row, and transcription glitches.",
+    "- Remove filler: um, uh, like, you know, I mean, so yeah, basically, right?, euh, genre, en fait, du coup, voilà (when used as filler).",
+    "- Fix spelling, grammar and punctuation. Break run-on speech into clear sentences.",
+    "- Format it well: if an entry is long or covers several things, split it into short paragraphs (one topic each), separated by a blank line (\\n\\n). No bullet points, no headings, no markdown.",
+    "- Keep his voice, first person, his meaning, and every fact, name, number and feeling. Do not summarise or shorten beyond removing repetition and filler. Never add events, feelings, advice or details he did not say.",
+    "- Keep the language he used (English, French or mixed). Write Islamic terms properly and consistently: Subh, Dhuhr, Jumuʿah, Asr, Maghrib, Isha, takbīr, khuṭbah, juz, ḥifẓ, murājaʿa, Seerah, in shāʾ Allāh, al-ḥamdu lillāh, mā shāʾ Allāh, subḥān Allāh, the Prophet ﷺ.",
     "- Return exactly one polished entry per input entry, in the same order, with the same time.",
     "",
     "Then judge the day as a whole, mainly from the tone and content of his writing (the scores are secondary context):",
@@ -496,7 +502,7 @@ function buildPrompt(entries, shukr, meta) {
     '- "hard": mostly struggle, low mood, or things went badly, without a positive turn.',
     "Give a title of at most 6 words, and a summary of 1–2 warm sentences written to him (\"You…\"), in the language he mostly wrote in.",
     "",
-    `Date: ${meta.longDate || ""} (${meta.hijri || ""}). App score: ${meta.score ?? "?"}/100 (salah ${meta.salah ?? "?"}/40, Qur'an ${meta.quran ?? "?"}/30, work ${meta.work ?? "?"}/20, walk ${meta.walk ?? "?"}/10).${meta.bonusList ? " Extra voluntary deeds: " + meta.bonusList + "." : ""}`,
+    `Date: ${meta.longDate || ""} (${meta.hijri || ""}). App score: ${meta.score ?? "?"}/100 (salah ${meta.salah ?? "?"}/40, Qur'an ${meta.quran ?? "?"}/30, productivity ${meta.work ?? "?"}/20, walk ${meta.walk ?? "?"}/10).${meta.bonusList ? " Extra voluntary deeds: " + meta.bonusList + "." : ""}`,
     "",
     "Entries (JSON):",
     JSON.stringify(entries),
@@ -551,7 +557,7 @@ function callAI(prompt, maxTokens) {
 /* ------------------------------------------------------------------ voice notes (OpenAI speech-to-text) */
 
 /** Words Whisper should expect, so religious and personal terms come out spelled right. */
-const VOICE_VOCAB = "Alhamdulillah, SubhanAllah, Bismillah, In sha Allah, Masha Allah, Subh, Fajr, Dhuhr, Asr, Maghrib, Isha, takbir, tahajjud, witr, duha, adhkar, rawatib, juz, hifz, Qur'an, Mushaf, Al-Mulk, masjid, MuslimPreneur, LinkedIn, Conakry, Bruxelles.";
+const VOICE_VOCAB = "Alhamdulillah, SubhanAllah, Bismillah, In sha Allah, Masha Allah, Subh, Fajr, Dhuhr, Asr, Maghrib, Isha, takbir, tahajjud, witr, duha, adhkar, rawatib, juz, hifz, Qur'an, Mushaf, Al-Mulk, masjid, Jumuah, khutbah, Seerah, tafsir, muraja'a, MuslimPreneur, LinkedIn, Conakry, Bruxelles.";
 
 function transcribe(audioB64, mime) {
   const p = PropertiesService.getScriptProperties();
@@ -641,7 +647,7 @@ function writeDoc(docId, date, meta, original, polished, shukrRaw, shukrOut, ver
 
   const all = [].concat.apply([], polished.map((e) => (e.photos || []).map(mediaItem).filter(Boolean)));
   const nPh = all.filter((m) => typeof m === "string").length, nVid = all.length - nPh;
-  const sub = [meta.hijri, nPh ? `📷 ${nPh}` : "", nVid ? `🎬 ${nVid}` : "", meta.score != null ? `Score ${Math.round(meta.score)}/100` : "", meta.portion ? `Ḥifẓ pages ${meta.portion}` : "", meta.hours ? `${meta.hours}h MuslimPreneur` : "", meta.steps ? `${Number(meta.steps).toLocaleString()} steps` : ""]
+  const sub = [meta.hijri, nPh ? `📷 ${nPh}` : "", nVid ? `🎬 ${nVid}` : "", meta.score != null ? `Score ${Math.round(meta.score)}/100` : "", meta.portion ? `Ḥifẓ pages ${meta.portion}` : "", meta.hours ? `${meta.hours}h productive` : "", meta.steps ? `${Number(meta.steps).toLocaleString()} steps` : ""]
     .filter(Boolean).join("  ·  ");
   body.appendParagraph(sub).setAttributes(Object.assign({}, base, { [DocumentApp.Attribute.FONT_SIZE]: 10, [DocumentApp.Attribute.FOREGROUND_COLOR]: "#6A6688", [DocumentApp.Attribute.FONT_FAMILY]: "Roboto" }));
 
@@ -664,9 +670,14 @@ function writeDoc(docId, date, meta, original, polished, shukrRaw, shukrOut, ver
     h("The day");
     polished.forEach((e) => {
       const time = String(e.t || "").trim();
-      const p = body.appendParagraph(`${time}   ${String(e.text || "").trim()}`);
-      p.setAttributes(base).setSpacingAfter(8);
-      if (time) p.editAsText().setBold(0, time.length - 1, true).setForegroundColor(0, time.length - 1, "#B97A12").setFontFamily(0, time.length - 1, "Roboto");
+      // Time on its own small line, then the entry in short paragraphs (the AI splits long voice notes by topic).
+      const tl = body.appendParagraph(time || "·");
+      tl.setAttributes(Object.assign({}, base, { [DocumentApp.Attribute.FONT_FAMILY]: "Roboto", [DocumentApp.Attribute.FONT_SIZE]: 9.5, [DocumentApp.Attribute.BOLD]: true, [DocumentApp.Attribute.FOREGROUND_COLOR]: "#B97A12" }));
+      tl.setSpacingBefore(10).setSpacingAfter(2).setLineSpacing(1);
+      const paras = String(e.text || "").replace(/\r/g, "").split(/\n\s*\n|\n/).map((x) => x.trim()).filter(Boolean);
+      let p = tl;
+      paras.forEach((t) => { p = body.appendParagraph(t); p.setAttributes(base).setSpacingBefore(0).setSpacingAfter(6); });
+      p.setSpacingAfter(8);
       const media = (e.photos || []).map(mediaItem).filter(Boolean);
       if (media.length) {
         p.setSpacingAfter(4);
@@ -1005,7 +1016,7 @@ function ensureLog(force) {
     if (last > 1 && oldW) {
       const rng = sh.getRange(2, 1, last - 1, oldW);
       const vals = rng.getValues(), forms = rng.getFormulas();
-      const from = COLUMNS.map(([h]) => oldHead.indexOf(h));
+      const from = COLUMNS.map(([h]) => { let i = oldHead.indexOf(h); (HEADER_ALIASES[h] || []).forEach((a) => { if (i < 0) i = oldHead.indexOf(a); }); return i; });
       moved = vals.map((row, r) => from.map((i) => (i < 0 ? "" : forms[r][i] || row[i])));
     }
     sh.getRange(2, 1, sh.getMaxRows() - 1, sh.getMaxColumns()).clearContent().clearDataValidations();
@@ -1258,7 +1269,7 @@ function buildInsights() {
       wdNote = `Your best day is ${WEEKDAYS[hi.w]} (${r1(hi.avg)}), your hardest is ${WEEKDAYS[lo.w]} (${r1(lo.avg)}).`;
     }
   }
-  const wdRange = block("By day of the week", wdNote, ["Day", "Days", "Avg score", "Salah /40", "Qur'an /30", "Work /20", "Walk /10"], wd.map((x) => x.row), wdMarks);
+  const wdRange = block("By day of the week", wdNote, ["Day", "Days", "Avg score", "Salah /40", "Qur'an /30", "Productive /20", "Walk /10"], wd.map((x) => x.row), wdMarks);
   if (wdRange) {
     sh.insertChart(sh.newChart().asColumnChart()
       .addRange(sh.getRange(wdRange.top, 2, 8, 1)).addRange(sh.getRange(wdRange.top, 4, 8, 1)).setNumHeaders(1)
@@ -1442,14 +1453,14 @@ function buildInsights() {
     const xs = days.filter((d) => d.key >= startK && d.key <= end);
     weeks.push([`Week of ${Utilities.formatDate(new Date(startK + "T12:00:00"), ctx.tz, "d MMM")}`, xs.reduce((n, d) => n + (d.pages || 0), 0), xs.reduce((n, d) => n + (d.revised || 0), 0), r1(xs.reduce((n, d) => n + (d.hours || 0), 0)), r0(avgOf(xs.map((d) => d.steps).filter((v) => v != null))), r1(avgOf(xs.map((d) => d.score)))]);
   }
-  block("Week by week (last 8 weeks)", "", ["Week", "Pages", "Revised", "Work hours", "Avg steps", "Avg score"], weeks);
+  block("Week by week (last 8 weeks)", "", ["Week", "Pages", "Revised", "Productive hours", "Avg steps", "Avg score"], weeks);
 
   /* ---- Work & walk ---- */
   const topicH = {};
   days.forEach((d) => { const ts = String(d.topics || "").split(",").map((t) => t.trim()).filter(Boolean); ts.forEach((t) => (topicH[t] = (topicH[t] || 0) + (d.hours || 0) / ts.length)); });
   const tk = Object.keys(topicH).sort((a, b) => topicH[b] - topicH[a]);
   const deep = days.filter((d) => d.hours >= 2), little = days.filter((d) => (d.hours || 0) < 1);
-  block("MuslimPreneur work", `Days with 2 h+ of work average ${r1(avgOf(deep.map((d) => d.score)))}; days under 1 h average ${r1(avgOf(little.map((d) => d.score)))}.`,
+  block("Productivity", `Days with 2 h+ of productive time average ${r1(avgOf(deep.map((d) => d.score)))}; days under 1 h average ${r1(avgOf(little.map((d) => d.score)))}.`,
     ["Topic", "Hours (approx.)", "Share"], tk.map((t) => [t, r1(topicH[t]), pc(topicH[t], tk.reduce((n, x) => n + topicH[x], 0))]));
   const walked = days.filter((d) => d.steps != null);
   const goal = walked.filter((d) => d.steps >= 8000);
@@ -1463,7 +1474,7 @@ function buildInsights() {
   /* ---- Months ---- */
   const months = {};
   days.forEach((d) => { const m = d.key.slice(0, 7); (months[m] = months[m] || []).push(d); });
-  block("Month by month", "", ["Month", "Days", "Avg score", "Salah", "Qur'an", "Work", "Walk"], Object.keys(months).sort().reverse().map((m) => {
+  block("Month by month", "", ["Month", "Days", "Avg score", "Salah", "Qur'an", "Productive", "Walk"], Object.keys(months).sort().reverse().map((m) => {
     const xs = months[m], a = (k2) => r1(avgOf(xs.map((d) => d[k2]).filter((v) => v != null)));
     return [Utilities.formatDate(new Date(m + "-15T12:00:00"), ctx.tz, "MMMM yyyy"), xs.length, a("score"), a("salah"), a("quran"), a("work"), a("walk")];
   }));
@@ -1591,7 +1602,7 @@ function weeklyLetter(endK) {
   });
   const prev = readDays().filter((d) => d.key >= shiftKey(startK, -7) && d.key < startK);
   const prompt = [
-    `You write a short weekly letter to ${ctx.name || "a young Muslim"} who tracks his days in an app called Muhasaba: salah (40 pts), Qur'an memorisation (30), work on his business MuslimPreneur (20) and walking (10), plus an evening check-in (sleep, phone use, energy, mood, a private "slipped" mark and whether he made tawbah).`,
+    `You write a short weekly letter to ${ctx.name || "a young Muslim"} who tracks his days in an app called Muhasaba: salah (40 pts), Qur'an memorisation (30), productive time (20: his business, learning the dīn, studies, skills) and walking (10), plus an evening check-in (sleep, phone use, energy, mood, a private "slipped" mark and whether he made tawbah).`,
     `Write in ${ctx.fr ? "French" : "English"}, warm and honest like a wise older brother, never preachy or flattering. Use only the facts given. Mention a slip only gently and only if tawbah context helps; never ask about details.`,
     `Previous week's average score: ${prev.length ? Math.round(avgOf(prev.map((d) => d.score))) : "unknown"}.`,
     "This week (JSON):",
@@ -1626,7 +1637,7 @@ function weeklyLetter(endK) {
   if (L.pattern) { H(ctx.fr ? "Ce que je remarque" : "A pattern", DocumentApp.ParagraphHeading.HEADING2); P(L.pattern); }
   if (L.focus) { H(ctx.fr ? "Une seule chose pour la semaine prochaine" : "One focus for next week", DocumentApp.ParagraphHeading.HEADING2); P(L.focus); }
   H(ctx.fr ? "Les chiffres" : "The numbers", DocumentApp.ParagraphHeading.HEADING2);
-  const t = body.appendTable([["", ctx.fr ? "Score" : "Score", "Salah", "Qur'an", ctx.fr ? "Travail" : "Work", ctx.fr ? "Marche" : "Walk", ctx.fr ? "Sommeil" : "Sleep"]].concat(
+  const t = body.appendTable([["", ctx.fr ? "Score" : "Score", "Salah", "Qur'an", ctx.fr ? "Productif" : "Productive", ctx.fr ? "Marche" : "Walk", ctx.fr ? "Sommeil" : "Sleep"]].concat(
     days.map((d) => [Utilities.formatDate(d.d, ctx.tz, "EEE d"), String(r1(d.score)), String(r1(d.salah)), String(r1(d.quran)), String(r1(d.work)), String(r1(d.walk)), d.sleepH != null ? d.sleepH + " h" : "–"])));
   t.setBorderColor("#E4E1F0");
   t.setAttributes(style({ FONT_SIZE: 10, FONT_FAMILY: "Roboto" }));
@@ -1686,7 +1697,7 @@ function buildDashboard(force) {
     ["Prayers in the mosque", `=IFERROR((COUNTIF(${prayers},"Before takbīr")+COUNTIF(${prayers},"Mosque (late)"))/(COUNTA(${prayers})-COUNTIF(${prayers},"Excused")),"–")`, "0%", C.violetSoft],
     ["Before the takbīr", `=COUNTIF(${prayers},"Before takbīr")`, "0", C.violetSoft],
     ["Pages memorised", `=SUM(${L("pages")})`, "0", C.violetSoft],
-    ["MuslimPreneur hours", `=SUM(${L("hours")})`, "0.#", C.violetSoft],
+    ["Productive hours", `=SUM(${L("hours")})`, "0.#", C.violetSoft],
     ["Days at 8k+ steps", `=COUNTIF(${L("steps")},">=8000")`, "0", C.violetSoft],
     ["✦ Bonus points", `=SUM(${L("bonus")})`, "0.#", C.goldSoft],
   ];

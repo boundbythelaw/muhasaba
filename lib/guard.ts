@@ -57,7 +57,7 @@ export function overwrites(prev: DayLog | undefined, next: DayLog): Overwrite[] 
     const key = k as "preview" | "juz" | "mulkSubh" | "mulkMaghrib";
     if (q0[key] && !q1[key]) out.push({ field: key, text: tr("Untick “{x}”", { x: tr(CHECKS[k]) }) });
   }
-  if (prev.work.hours > 0 && prev.work.hours !== next.work.hours) out.push({ field: "hours", text: `MuslimPreneur: ${prev.work.hours}h → ${next.work.hours}h` });
+  if (prev.work.hours > 0 && prev.work.hours !== next.work.hours) out.push({ field: "hours", text: `${tr("Productive")}: ${prev.work.hours}h → ${next.work.hours}h` });
   for (const t of prev.work.topics) if (!next.work.topics.includes(t)) out.push({ field: `topic:${t}`, text: tr("Remove topic “{x}”", { x: tr(t) }) });
   if (prev.steps && prev.steps !== next.steps) out.push({ field: "steps", text: `${tr("Steps")}: ${steps(prev.steps)} → ${steps(next.steps)}` });
   for (const it of BONUS_ITEMS) if (prev.bonus[it.id] && !next.bonus[it.id]) out.push({ field: `bonus:${it.id}`, text: tr("Untick “{x}”", { x: tr(it.label) }) });

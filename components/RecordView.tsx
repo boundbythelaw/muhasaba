@@ -54,7 +54,7 @@ export default function RecordView() {
     [`${prayed ? Math.round((mosque / prayed) * 100) : 0}%`, tr("prayers in the mosque")],
     [String(early), tr("before takbīr this week")],
     [String(memorised), tr("pages memorised since {d}", { d: shortDate(prefs.baseDate) })],
-    [`${fmt(hrs)}h`, tr("MuslimPreneur · {w}/7 walks", { w: walks })],
+    [`${fmt(hrs)}h`, tr("Productive · {w}/7 walks", { w: walks })],
     [`+${fmt(bonusPts)}`, tr("✦ bonus this week"), true],
     [String(tahajjud), tr("nights of tahajjud this week")],
   ];
