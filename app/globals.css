@@ -833,3 +833,19 @@ html { scroll-padding-top: 76px; }
 .stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .stat.gold b { color: var(--gold); }
 .stat span { overflow-wrap: anywhere; }
+
+/* prayer strip, calmer: one neutral tile style, status as a coloured bar + number, selection as a clean outline */
+.pstrip { gap: 6px; padding: 2px; }
+.pchip, .pchip.top, .pchip.mid, .pchip.bad, .pchip.ex, .pchip.due { background: var(--raised); border: 1.5px solid var(--line); border-style: solid; transform: none; box-shadow: none; overflow: hidden; padding: 9px 2px 11px; }
+.pchip::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: transparent; }
+.pchip.top::before { background: var(--good); }
+.pchip.mid::before { background: var(--gold); }
+.pchip.bad::before { background: var(--warn); }
+.pchip.ex::before { background: repeating-linear-gradient(90deg, var(--good) 0 6px, transparent 6px 10px); }
+.pchip.due .pc-s { color: var(--accent); }
+.pchip.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--raised)); box-shadow: 0 6px 16px -10px var(--accent); transform: none; }
+.pchip.live::after { content: none; }
+.pc-n { display: inline-flex; align-items: center; gap: 4px; }
+.pc-live { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; animation: recblink 1.4s ease-in-out infinite; }
+.pfocus.live { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent); }
+.pc-live { animation: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }

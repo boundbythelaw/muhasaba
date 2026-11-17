@@ -80,7 +80,7 @@ export default function SalahCard() {
             <motion.button key={id} role="tab" aria-selected={focus === id} {...tap}
               className={`pchip ${focus === id ? "sel" : ""} ${ex ? "ex" : m === 2 ? "top" : m === 1 ? "mid" : m === 0 ? "bad" : started(id) && isToday ? "due" : ""} ${live === id ? "live" : ""}`}
               onClick={() => { setSel(id); haptic(5); }}>
-              <span className="pc-n">{tr(n.en)}</span>
+              <span className="pc-n">{live === id && <i className="pc-live" aria-label={tr("now")} />}{tr(n.en)}</span>
               <span className="pc-t num">{t ? fmtTime(t, tz) : ""}</span>
               <span className="pc-s num">{m == null && !ex ? (live === id ? "●" : "–") : prayerPoints(day, id)}</span>
             </motion.button>
