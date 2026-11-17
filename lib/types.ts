@@ -52,7 +52,7 @@ export interface DocInfo {
 }
 
 /** Why a prayer was late or missed at the mosque. The first four are valid excuses (full points when prayed properly). */
-export type PrayerReason = "travel" | "ill" | "period" | "weather" | "slept" | "phone" | "work" | "lazy" | "outage" | "other";
+export type PrayerReason = "travel" | "ill" | "period" | "weather" | "nature" | "slept" | "phone" | "work" | "lazy" | "outage" | "other";
 export interface PrayerWhy { r: PrayerReason; /** for an excuse: prayed it the way the Sunnah allows */ ok?: boolean }
 
 /** The required evening check-in. Sleep is the night before this day. */
@@ -69,8 +69,25 @@ export interface Checkin {
 /** A murājaʿa (revision) range, Mushaf pages inclusive. */
 export interface RevRange { from: number; to: number }
 
+/** Khushūʿ after a prayer. f: 2 present · 1 on and off · 0 mostly elsewhere. back: 2 at once · 1 after a while · 0 didn't. */
+export interface Khushu { f: 0 | 1 | 2; what: string[]; why: string[]; back: 0 | 1 | 2 | null; note?: string }
+/** Late to the mosque: rakʿahs missed (0 = joined right after the takbīr) out of the prayer's total. */
+export interface Late { m: number; of: number }
+export interface Tathbit { page: number | null; mem: number; read: number }
+export interface Workout { done: boolean; minutes: number | null; kinds: string[] }
+export interface Urge { t: string; trig: string[]; ok: boolean }
+/** Self-control (private). `relapse` marks a slip that day. */
+export interface SelfControl { urges: Urge[]; relapse: boolean }
+
 export interface DayLog {
+  /** Scoring rules this day is counted with (1 = before the v2 update). Old days keep their old scores. */
+  v: number;
   prayers: Partial<Record<PrayerId, PrayerMark>>;
+  late: Partial<Record<PrayerId, Late>>;
+  khushu: Partial<Record<PrayerId, Khushu>>;
+  tathbit: Tathbit;
+  workout: Workout;
+  sc: SelfControl;
   why: Partial<Record<PrayerId, PrayerWhy>>;
   checkin: Checkin;
   rev: RevRange[];
@@ -97,6 +114,12 @@ export interface Prefs {
   asr: "standard" | "hanafi";
   /** Shows the menstruation excuse for women. */
   gender: "m" | "f" | "";
+  /** Day the self-control streak started being tracked. */
+  scStart?: string;
+  /** Next Baqarah page for tathbīt (re-memorisation). */
+  tathbitNext?: number;
+  /** Last "What's new" version seen. */
+  seenUpdate?: number;
 }
 
 export interface RunningTimer {

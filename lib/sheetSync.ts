@@ -76,6 +76,24 @@ export function buildRow(date: string, days: Record<string, DayLog>, prefs: Pref
     return `${en}: ${r.label}${r.excuse ? (excused(w) ? " ✓" : " (not prayed properly)") : ""}`;
   }).join(" · ");
   row.excused = PRAYERS.filter(({ id }) => excused(d.why[id])).length;
+  // Rules version: days logged before an update keep their old scoring; new fields say "n/a" there.
+  const v2 = (d.v ?? 1) >= 2;
+  const na = "n/a";
+  row.rules = d.v ?? 1;
+  const lateTxt = PRAYERS.filter(({ id }) => d.prayers[id] === 1 && d.late[id]).map(({ en, id }) => `${en} ⏱ ${d.late[id]!.m === 0 ? "right after takbīr" : `missed ${d.late[id]!.m}/${d.late[id]!.of} rakʿah`}`);
+  if (lateTxt.length) row.reasons = [lateTxt.join(" · "), row.reasons].filter(Boolean).join(" · ");
+  const FOCUS_TXT = ["mostly elsewhere", "on and off", "present"];
+  const ks = PRAYERS.filter(({ id }) => d.khushu[id]);
+  row.khushu = !v2 ? na : ks.length ? Math.round((ks.reduce((n, { id }) => n + d.khushu[id]!.f, 0) / (ks.length * 2)) * 100) : null;
+  row.khushuNote = !v2 ? na : ks.map(({ id, en }) => {
+    const k = d.khushu[id]!;
+    const extra = [...k.what, ...k.why].join(", ");
+    return `${en}: ${FOCUS_TXT[k.f]}${extra ? ` (${extra})` : ""}${k.back != null && k.f < 2 ? ` · back ${["never", "after a while", "at once"][k.back]}` : ""}${k.note ? ` · “${k.note}”` : ""}`;
+  }).join(" · ");
+  row.workout = !v2 ? na : d.workout.done ? ["✓", d.workout.minutes ? `${d.workout.minutes} min` : "", d.workout.kinds.join(", ")].filter(Boolean).join(" · ") : "";
+  row.tathbit = !v2 ? na : d.tathbit.page ? `p. ${d.tathbit.page} · ${d.tathbit.mem}/10 + ${d.tathbit.read}/10` : "";
+  const ur = d.sc.urges;
+  row.sc = !v2 ? na : ur.length || d.sc.relapse ? `${ur.filter((u) => u.ok).length}/${ur.length} urges beaten${d.sc.relapse ? " · slipped" : ""}` : "";
   const c = d.checkin;
   row.slept = c.slept;
   row.woke = c.woke;

@@ -2,7 +2,8 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { isJumuah, prayerName, PRAYERS, REASONS, reasonOf, type PrayerId } from "@/lib/constants";
-import { excused } from "@/lib/scoring";
+import { excused, prayerPoints } from "@/lib/scoring";
+import PrayerFlow, { FOCUS } from "./PrayerFlow";
 import { todayKey } from "@/lib/dates";
 import { haptic, toast } from "@/lib/fx";
 import { getLang, getName, tr } from "@/lib/i18n";
@@ -12,24 +13,21 @@ import type { PrayerMark } from "@/lib/types";
 import { BottomSheet } from "./Sheets";
 import { CardShell, Segmented, tap } from "./ui";
 
-const OPTIONS = [
-  { value: 0 as PrayerMark, label: "No mosque", sub: "0", tone: "bad" as const },
-  { value: 1 as PrayerMark, label: "Mosque", sub: "late · 4" },
-  { value: 2 as PrayerMark, label: "Before takbīr", sub: "8", tone: "top" as const },
-];
-/** Friday: the virtue is being there before the imam climbs the minbar. */
-const JUMUAH_OPTIONS = [
-  { value: 0 as PrayerMark, label: "Missed it", sub: "Dhuhr · 0", tone: "bad" as const },
-  { value: 1 as PrayerMark, label: "Late", sub: "khuṭbah began · 4" },
-  { value: 2 as PrayerMark, label: "Before the khuṭbah", sub: "8", tone: "top" as const },
+const MARKS = [
+  { v: 2 as PrayerMark, label: "Before takbīr", jlabel: "Before the khuṭbah", sub: "8", tone: "top" },
+  { v: 1 as PrayerMark, label: "Late", jlabel: "Late", sub: "6 · 4 · 2 · 0", tone: "mid" },
+  { v: 0 as PrayerMark, label: "Not at the mosque", jlabel: "Missed Jumuʿah", sub: "0", tone: "bad" },
 ];
 
+/**
+ * Salah, one prayer at a time: a strip of the five prayers, and the one that needs you now in focus.
+ * Logging opens a short step-by-step popup (when you joined, why, khushūʿ).
+ */
 export default function SalahCard() {
   const { day, scores, update, cur, prefs } = useStore();
   const [locOpen, setLocOpen] = useState(false);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
-  const atMosque = PRAYERS.filter(({ id }) => (day.prayers[id] ?? -1) >= 1).length;
   const early = PRAYERS.filter(({ id }) => day.prayers[id] === 2).length;
   const isToday = cur === todayKey();
   let times: ReturnType<typeof timesFor> | null = null;
@@ -37,10 +35,105 @@ export default function SalahCard() {
   const live = isToday && times ? currentPrayer(times, now) : null;
   const next = isToday && times ? PRAYERS.find(({ id }) => times![id].getTime() > now.getTime())?.id : undefined;
   const tz = prefs.prayerLoc.tz;
-  const [ask, setAsk] = useState<PrayerId | null>(null);
+  const started = (id: PrayerId) => !isToday || !times || times[id].getTime() <= now.getTime();
+  // The prayer that needs you: the first one whose time came and isn't logged; else the next one; else Isha.
+  const auto = PRAYERS.find(({ id }) => day.prayers[id] == null && !day.why[id] && started(id))?.id ?? next ?? "isha";
+  const [sel, setSel] = useState<PrayerId | null>(null);
+  useEffect(() => setSel(null), [cur]);
+  const focus = sel ?? auto;
+  const [flow, setFlow] = useState<{ id: PrayerId; start?: "late" | "why" | "khushu" } | null>(null);
+  const v2 = (day.v ?? 1) >= 2;
+
+  const { en, ar } = prayerName(focus, cur, prefs.gender);
+  const jumuah = isJumuah(focus, cur, prefs.gender);
+  const at = times?.[focus];
+  const mark = day.prayers[focus];
+  const w = day.why[focus];
+  const r = reasonOf(w?.r);
+  const k = day.khushu[focus];
+
+  const pick = (v: PrayerMark, e: React.MouseEvent) => {
+    const id = focus;
+    void update((d) => {
+      if (d.prayers[id] === v) { delete d.prayers[id]; delete d.why[id]; delete d.late[id]; delete d.khushu[id]; return; }
+      d.prayers[id] = v;
+      if (v === 2) { delete d.why[id]; delete d.late[id]; }
+      if (v === 0) delete d.late[id];
+    }, e).then((ok) => {
+      if (!ok || day.prayers[id] === v) return;
+      haptic(v === 2 ? 18 : 8);
+      setFlow({ id });
+    });
+  };
 
   return (
-    <CardShell id="sec-p" title="Salah" ar="الصلاة" value={scores.p} max={40} done={scores.p >= 40} summary={tr("All five in jamāʿah before the takbīr")}>
+    <CardShell id="sec-p" title="Salah" ar="الصلاة" value={scores.p} max={40} done={scores.p >= 40} startOpen
+      summary={tr("All five in jamāʿah before the takbīr")}
+      pending={tr("{n} of 5 logged", { n: PRAYERS.filter(({ id }) => day.prayers[id] != null || excused(day.why[id])).length })}>
+      <div className="pstrip" role="tablist">
+        {PRAYERS.map(({ id }) => {
+          const n = prayerName(id, cur, prefs.gender);
+          const m = day.prayers[id];
+          const ex = excused(day.why[id]);
+          const t = times?.[id];
+          return (
+            <motion.button key={id} role="tab" aria-selected={focus === id} {...tap}
+              className={`pchip ${focus === id ? "sel" : ""} ${ex ? "ex" : m === 2 ? "top" : m === 1 ? "mid" : m === 0 ? "bad" : started(id) && isToday ? "due" : ""} ${live === id ? "live" : ""}`}
+              onClick={() => { setSel(id); haptic(5); }}>
+              <span className="pc-n">{tr(n.en)}</span>
+              <span className="pc-t num">{t ? fmtTime(t, tz) : ""}</span>
+              <span className="pc-s num">{m == null && !ex ? (live === id ? "●" : "–") : prayerPoints(day, id)}</span>
+            </motion.button>
+          );
+        })}
+      </div>
+
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div key={focus + cur} className={`pfocus ${live === focus ? "live" : ""}`}
+          initial={{ opacity: 0, y: 10, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8, scale: 0.98 }} transition={{ type: "spring", stiffness: 380, damping: 30 }}>
+          <div className="pf-head">
+            <div>
+              <h3>{tr(en)} <span className="ar">{ar}</span></h3>
+              <span className="pf-time num">
+                {at ? fmtTime(at, tz) : ""}
+                {live === focus && <em className="tag now">{tr("now")}</em>}
+                {next === focus && at && <em className="tag soon">{tr("in {t}", { t: untilText(at.getTime() - now.getTime(), getLang()) })}</em>}
+              </span>
+            </div>
+            <motion.div className="pf-pts num" key={prayerPoints(day, focus)} initial={{ scale: 0.7 }} animate={{ scale: 1 }}>
+              {prayerPoints(day, focus)}<small>/8</small>
+            </motion.div>
+          </div>
+          <div className="pf-marks">
+            {MARKS.map((o) => (
+              <motion.button key={o.v} {...tap} className={`pf-mark ${o.tone} ${mark === o.v ? "on" : ""}`} onClick={(e) => pick(o.v, e)}>
+                <b>{tr(jumuah ? o.jlabel : o.label)}</b>
+                <small className="num">{o.v === 1 && !v2 ? "4" : o.sub}</small>
+              </motion.button>
+            ))}
+          </div>
+          {(mark != null || w) && (
+            <div className="pf-info">
+              {mark === 1 && v2 && (
+                <button className="pf-tag" onClick={() => setFlow({ id: focus, start: "late" })}>
+                  {day.late[focus] ? (day.late[focus]!.m === 0 ? tr("Right after the takbīr") : tr("Missed {n} rakʿah", { n: day.late[focus]!.m })) : tr("+ When did you join?")}
+                </button>
+              )}
+              {(mark === 0 || mark === 1 || w) && (
+                <button className={`pf-tag ${r?.excuse ? (excused(w) ? "ex" : "warn") : ""}`} onClick={() => setFlow({ id: focus, start: "why" })}>
+                  {r ? `${tr(r.label)}${excused(w) ? " ✓" : ""}` : tr("+ Why?")}
+                </button>
+              )}
+              {mark != null && w?.r !== "period" && (
+                <button className={`pf-tag k${k?.f ?? ""}`} onClick={() => setFlow({ id: focus, start: "khushu" })}>
+                  {k ? `${FOCUS.find((f) => f.v === k.f)!.face} ${tr(FOCUS.find((f) => f.v === k.f)!.label)}` : tr("+ Khushūʿ")}
+                </button>
+              )}
+            </div>
+          )}
+        </motion.div>
+      </AnimatePresence>
+
       <motion.button className="locbar" onClick={() => { setLocOpen(true); haptic(6); }} whileTap={{ scale: 0.98 }}>
         <span aria-hidden="true">📍</span>
         <b>{prefs.prayerLoc.label}</b>
@@ -48,48 +141,7 @@ export default function SalahCard() {
         <span className="change">{tr("Change")}</span>
       </motion.button>
 
-      <div className="ch">
-        <p className="sub" style={{ margin: 0 }}>{tr("{a} of 5 in the mosque · {b} before the takbīr", { a: atMosque, b: early })}</p>
-        <div className="lamps" aria-hidden="true">
-          {PRAYERS.map(({ id }) => {
-            const v = day.prayers[id];
-            return <motion.i key={id} className={v === 2 ? "t" : v === 1 ? "m" : ""} animate={{ scale: v === 2 ? [1, 1.5, 1] : 1 }} transition={{ duration: 0.4 }} />;
-          })}
-        </div>
-      </div>
-
-      <WhySheet id={ask} onClose={() => setAsk(null)} />
-
-      {PRAYERS.map(({ id }) => {
-        const { en, ar } = prayerName(id, cur, prefs.gender);
-        const jumuah = isJumuah(id, cur, prefs.gender);
-        const at = times?.[id];
-        const isLive = live === id, isNext = next === id;
-        const missed = isToday && at && at.getTime() < now.getTime() && day.prayers[id] == null && !isLive;
-        return (
-          <div className={`prow ${isLive ? "live" : ""} ${isNext ? "next" : ""}`} key={id}>
-            <motion.button className="pname" title={tr("Tap to cycle")} {...tap}
-              onClick={(e) => update((d) => { const c = d.prayers[id]; d.prayers[id] = c == null ? 2 : c === 2 ? 1 : c === 1 ? 0 : 2; if (d.prayers[id] === 2) delete d.why[id]; }, e)}>
-              <b>{tr(en)}</b>
-              <span className="ptime num">
-                {at ? fmtTime(at, tz) : ""}
-                {isLive && <em className="tag now">{tr("now")}</em>}
-                {isNext && at && <em className="tag soon">{tr("in {t}", { t: untilText(at.getTime() - now.getTime(), getLang()) })}</em>}
-                {missed && <em className="tag miss">{tr("log it")}</em>}
-                {excused(day.why[id]) && <em className="tag ex">{tr("excused")}</em>}
-              </span>
-              <span className="par">{ar}</span>
-            </motion.button>
-            <Segmented ariaLabel={tr(en)} options={jumuah ? JUMUAH_OPTIONS : OPTIONS} value={day.prayers[id]}
-              onSelect={(v, e) => {
-                const was = day.prayers[id];
-                void update((d) => { if (d.prayers[id] === v) { delete d.prayers[id]; delete d.why[id]; } else { d.prayers[id] = v; if (v === 2) delete d.why[id]; } }, e)
-                  .then((ok) => { if (ok && was !== v && v !== 2 && !day.why[id]) setAsk(id); });
-              }} />
-            {(day.prayers[id] === 0 || day.prayers[id] === 1 || day.why[id]) && <WhyPill id={id} onOpen={() => setAsk(id)} />}
-          </div>
-        );
-      })}
+      <PrayerFlow id={flow?.id ?? null} start={flow?.start} onClose={() => setFlow(null)} />
 
       <AnimatePresence>
         {early === 5 && (
@@ -100,74 +152,6 @@ export default function SalahCard() {
       </AnimatePresence>
       <LocationSheet open={locOpen} onClose={() => setLocOpen(false)} />
     </CardShell>
-  );
-}
-
-/* ---------- Why late / not at the mosque ---------- */
-
-/** One small line under the prayer: the reason picked (tap to change), or a link to add one. */
-function WhyPill({ id, onOpen }: { id: PrayerId; onOpen: () => void }) {
-  const { day } = useStore();
-  const w = day.why[id];
-  const r = reasonOf(w?.r);
-  return (
-    <button className={`whypill ${r?.excuse ? (excused(w) ? "ex" : "exq") : r ? "set" : ""}`} onClick={() => { onOpen(); haptic(5); }}>
-      {r ? <>{tr("Why")}: <b>{tr(r.label)}</b>{r.excuse ? (excused(w) ? ` · ${tr("excused")} ✓` : ` · ${tr("confirm")}…`) : ""}</> : <>+ {tr("Add a reason")}</>}
-    </button>
-  );
-}
-
-/** The popup that asks why, right after you mark a prayer "late" or "no mosque". */
-function WhySheet({ id, onClose }: { id: PrayerId | null; onClose: () => void }) {
-  const { day, update, prefs, cur } = useStore();
-  const p = id ? prayerName(id, cur, prefs.gender) : null;
-  const w = id ? day.why[id] : undefined;
-  const r = reasonOf(w?.r);
-  const list = REASONS.filter((x) => !x.women || prefs.gender === "f");
-  const set = (rid: (typeof REASONS)[number]["id"]) => id && update((d) => {
-    if (d.why[id]?.r === rid) delete d.why[id];
-    else d.why[id] = { r: rid, ok: rid === "period" ? true : undefined };
-  }, null, true, { noConfirm: true });
-  return (
-    <BottomSheet open={!!id} onClose={onClose} label={tr("Why?")}>
-      {id && p && (
-        <div className="sheet-body">
-          <h3>{day.prayers[id] === 1 ? tr("Why were you late for {p}?", { p: tr(p.en) }) : tr("Why weren't you at the mosque for {p}?", { p: tr(p.en) })}</h3>
-          <div className="lab">{tr("Valid excuses")}</div>
-          <div className="whychips">
-            {list.filter((x) => x.excuse).map((x) => (
-              <motion.button key={x.id} {...tap} className={`whychip ex ${w?.r === x.id ? "on" : ""}`} onClick={() => { set(x.id); haptic(6); }}>{tr(x.label)}</motion.button>
-            ))}
-          </div>
-          <AnimatePresence initial={false}>
-            {r?.excuse && (
-              <motion.div className="whyok" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>
-                {r.okLabel ? (
-                  <motion.button {...tap} className={`whytick ${w?.ok ? "on" : ""}`}
-                    onClick={(e) => update((d) => { const x = d.why[id]; if (x) x.ok = !x.ok; }, e, false, { noConfirm: true })}>
-                    <i>{w?.ok ? "✓" : ""}</i><span>{tr(r.okLabel)}</span><b>{w?.ok ? tr("Excused · 8") : "+8"}</b>
-                  </motion.button>
-                ) : (
-                  <p className="note">{tr("You're not required to pray. It counts as full, in shāʾ Allāh.")}</p>
-                )}
-                {(w?.r === "travel" || w?.r === "period" || w?.r === "ill") && excused(w) && (
-                  <motion.button {...tap} className="linkbtn" onClick={(e) => update((d) => {
-                    for (const q of PRAYERS) { if (d.prayers[q.id] !== 2) { d.why[q.id] = { ...w! }; if (d.prayers[q.id] == null) d.prayers[q.id] = 0; } }
-                  }, e, false, { noConfirm: true })}>{tr("Same for all of today's prayers")}</motion.button>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-          <div className="lab">{tr("Other reasons")}</div>
-          <div className="whychips">
-            {list.filter((x) => !x.excuse).map((x) => (
-              <motion.button key={x.id} {...tap} className={`whychip ${w?.r === x.id ? "on" : ""}`} onClick={() => { set(x.id); haptic(6); }}>{tr(x.label)}</motion.button>
-            ))}
-          </div>
-          <motion.button className="btn big" {...tap} onClick={onClose}>{w ? tr("Done") : tr("Skip")}</motion.button>
-        </div>
-      )}
-    </BottomSheet>
   );
 }
 

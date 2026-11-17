@@ -11,7 +11,8 @@ import TimerBar from "./TimerBar";
 import { CardShell, CheckRow, Pill, Segmented, tap } from "./ui";
 import { useEffect, useMemo, useState } from "react";
 import { murajaaPlan, rangeOf } from "@/lib/murajaa";
-import { Disclose } from "./ui";
+import { AnimatedNumber, Disclose } from "./ui";
+import { burst } from "@/lib/fx";
 
 export default function QuranCard() {
   const { day, days, prefs, cur, scores, update, timers, setTimers } = useStore();
@@ -93,6 +94,9 @@ export default function QuranCard() {
       <div className="checks">
         <CheckRow on={q.preview} title={tr("Previewed tomorrow's pages")} sub={tr("Pages {a}–{b}", { a: po.previewFrom, b: po.previewTo })} points={5} onToggle={toggle("preview")} />
         <MurajaaRow />
+      </div>
+      <TathbitPanel />
+      <div className="checks">
         <CheckRow on={q.mulkSubh} title={tr("Sūrat al-Mulk after Subh")} points={2.5} onToggle={toggle("mulkSubh")} />
         <CheckRow on={q.mulkMaghrib} title={tr("Sūrat al-Mulk after Maghrib")} points={2.5} onToggle={toggle("mulkMaghrib")} />
       </div>
@@ -123,6 +127,70 @@ export default function QuranCard() {
       </p>
       </Disclose>
     </CardShell>
+  );
+}
+
+/** Tathbīt page for a day: continue yesterday's page until it's done 10 + 10, then the next one. Baqarah starts on page 2. */
+function suggestTathbit(days: Record<string, import("@/lib/types").DayLog>, date: string) {
+  for (const k of Object.keys(days).sort().reverse()) {
+    if (k >= date) continue;
+    const t = days[k].tathbit;
+    if (t?.page) return t.mem >= 10 && t.read >= 10 ? t.page + 1 : t.page;
+  }
+  return 2;
+}
+
+/**
+ * Tathbīt (re-memorisation): one page a day, 10 times from memory and 10 times reading.
+ * Two big tap counters with rings; finishing both moves tomorrow to the next page. Bonus ✦ up to +5.
+ */
+function TathbitPanel() {
+  const { day, days, cur, update } = useStore();
+  const t = day.tathbit;
+  const page = t.page ?? suggestTathbit(days, cur);
+  const done = t.mem >= 10 && t.read >= 10;
+  const bump = (k: "mem" | "read", by: number, e?: React.MouseEvent) => update((d) => {
+    d.tathbit.page = d.tathbit.page ?? page;
+    d.tathbit[k] = Math.max(0, Math.min(10, d.tathbit[k] + by));
+  }, e ?? null, true, { noConfirm: true }).then((ok) => {
+    if (!ok) return;
+    haptic(by > 0 ? 12 : 5);
+    const after = { ...t, [k]: Math.max(0, Math.min(10, t[k] + by)) };
+    if (by > 0 && after[k] === 10) toast(k === "mem" ? tr("10× from memory. Now read it 10×.") : tr("10× read."));
+    if (!done && after.mem >= 10 && after.read >= 10 && e) { burst(e.clientX, e.clientY); toast(tr("Page {p} re-memorised. Tomorrow: page {n}, in shāʾ Allāh.", { p: page, n: page + 1 })); }
+  });
+  const setPage = (p: number) => update((d) => { d.tathbit.page = Math.max(1, Math.min(604, p)); d.tathbit.mem = 0; d.tathbit.read = 0; }, null, true);
+  return (
+    <div className={`tathbit ${done ? "done" : ""}`}>
+      <div className="ch">
+        <div className="lab">{tr("Tathbīt · re-memorising")} <span className="ar" style={{ fontSize: 15 }}>تثبيت</span></div>
+        <div className="tb-page">
+          <button aria-label={tr("Previous page")} onClick={() => setPage(page - 1)}>‹</button>
+          <b className="num">{tr("Page {p}", { p: page })}</b>
+          <button aria-label={tr("Next page")} onClick={() => setPage(page + 1)}>›</button>
+        </div>
+      </div>
+      <div className="tb-counters">
+        {(["mem", "read"] as const).map((k) => {
+          const n = t.page ? t[k] : 0;
+          const pct = n / 10;
+          return (
+            <div className="tb-c" key={k}>
+              <motion.button className={`tb-ring ${n >= 10 ? "full" : ""}`} whileTap={{ scale: 0.9 }} onClick={(e) => bump(k, 1, e)} aria-label={k === "mem" ? tr("Memorised once more") : tr("Read once more")}>
+                <svg viewBox="0 0 100 100" aria-hidden="true">
+                  <circle cx="50" cy="50" r="44" className="tb-bg" />
+                  <motion.circle cx="50" cy="50" r="44" className="tb-fg" initial={false} animate={{ pathLength: pct }} transition={{ type: "spring", stiffness: 160, damping: 20 }} style={{ rotate: -90, transformOrigin: "50% 50%" }} />
+                </svg>
+                <span className="num"><AnimatedNumber value={n} /><small>/10</small></span>
+              </motion.button>
+              <span className="tb-lab">{k === "mem" ? tr("From memory") : tr("Reading")}</span>
+              <button className="tb-minus" onClick={() => bump(k, -1)} disabled={!n} aria-label={tr("Undo one")}>−1</button>
+            </div>
+          );
+        })}
+      </div>
+      <p className="note">{done ? tr("Done for today. Bārak Allāhu fīk. ✦ +5") : tr("Tap a circle each time. 10 + 10 = ✦ +5 bonus.")}</p>
+    </div>
   );
 }
 

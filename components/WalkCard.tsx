@@ -10,6 +10,7 @@ import { AnimatedNumber, CardShell, Pill } from "./ui";
 
 export default function WalkCard() {
   const { day, scores, update, locked, requestUnlock, cur } = useStore();
+  const v2 = (day.v ?? 1) >= 2;
   const [editing, setEditing] = useState(false);
   const st = day.steps ?? 0;
   const pct = Math.min(st / STEP_GOAL, 1);
@@ -28,7 +29,9 @@ export default function WalkCard() {
   };
 
   return (
-    <CardShell id="sec-s" title={tr("Daily walk")} value={scores.s} max={10} done={scores.s >= 10} summary={tr("{n} steps", { n: num(st) })}>
+    <CardShell id="sec-s" title={tr("Health")} ar="الصحة" value={scores.s} max={10} done={scores.s >= 10}
+      summary={`${tr("{n} steps", { n: num(st) })}${day.workout.done ? " · " + tr("workout ✓") : ""}`}>
+      {v2 && <p className="sub">{tr("Steps 5 (8,000) + home workout 5.")}</p>}
       <motion.button className="stepscard" onClick={() => (locked ? requestUnlock(cur) : setEditing(true))} whileTap={{ scale: 0.98 }} aria-label={tr("Edit steps")}>
         <div className="stepsbig">
           <b className="num"><AnimatedNumber value={st} /></b>
@@ -47,7 +50,44 @@ export default function WalkCard() {
           <Pill key={n} on={day.steps === n} onClick={(e) => save(day.steps === n ? null : n, e)}>{n / 1000}k</Pill>
         ))}
       </div>
+      {v2 ? <WorkoutPanel /> : <p className="note">{tr("The workout wasn't in the app yet on this day, so steps count for all 10.")}</p>}
       <StepsSheet open={editing} onClose={() => setEditing(false)} value={day.steps} onSave={(n) => save(n)} />
     </CardShell>
+  );
+}
+
+const KINDS = ["Push-ups", "Squats", "Core / abs", "Pull-ups", "Lunges", "Cardio", "Stretching"];
+
+/** Home workout: one big tap for done (+5), then optional minutes and what you trained. */
+function WorkoutPanel() {
+  const { day, update } = useStore();
+  const w = day.workout;
+  const toggle = (e: React.MouseEvent) => update((d) => { d.workout.done = !d.workout.done; }, e).then((ok) => {
+    if (ok && !w.done) { burst(e.clientX, e.clientY); haptic(25); toast(tr("Workout done. Your body has a right over you.")); }
+  });
+  return (
+    <div className="workout">
+      <motion.button className={`wo-main ${w.done ? "on" : ""}`} whileTap={{ scale: 0.96 }} onClick={toggle}>
+        <motion.span className="wo-ico" animate={w.done ? { rotate: [0, -12, 12, 0], scale: [1, 1.25, 1] } : {}} transition={{ duration: 0.5 }}>💪</motion.span>
+        <span className="wo-txt"><b>{w.done ? tr("Workout done") : tr("Home workout")}</b><small>{w.done ? tr("tap to undo") : tr("tap when you've trained")}</small></span>
+        <em className="num">{w.done ? "5/5" : "+5"}</em>
+      </motion.button>
+      <AnimatePresence initial={false}>
+        {w.done && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} style={{ overflow: "hidden" }}>
+            <div className="row">
+              {[10, 20, 30, 45, 60].map((m) => (
+                <Pill key={m} on={w.minutes === m} onClick={(e) => update((d) => { d.workout.minutes = d.workout.minutes === m ? null : m; }, e, true, { noConfirm: true })}>{m} min</Pill>
+              ))}
+            </div>
+            <div className="row">
+              {KINDS.map((k) => (
+                <Pill key={k} on={w.kinds.includes(k)} onClick={(e) => update((d) => { d.workout.kinds = d.workout.kinds.includes(k) ? d.workout.kinds.filter((x) => x !== k) : [...d.workout.kinds, k]; }, e, true, { noConfirm: true })}>{tr(k)}</Pill>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }

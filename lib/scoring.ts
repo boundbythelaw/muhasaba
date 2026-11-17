@@ -1,4 +1,5 @@
 import { MAX, MUSHAF_PAGES, PRAYERS, reasonOf, STEP_GOAL } from "./constants";
+import { latePoints, RULES } from "./rules";
 import { tr } from "./i18n";
 import { blankBonus, bonusPoints, normalizeBonus } from "./bonus";
 import type { Checkin, DayLog, PrayerWhy, Prefs, RevRange, Scores } from "./types";
@@ -30,7 +31,13 @@ export const revPages = (rev: RevRange[]) => rev.reduce((n, r) => n + Math.max(0
 
 export function blankDay(): DayLog {
   return {
+    v: RULES,
     prayers: {},
+    late: {},
+    khushu: {},
+    tathbit: { page: null, mem: 0, read: 0 },
+    workout: { done: false, minutes: null, kinds: [] },
+    sc: { urges: [], relapse: false },
     why: {},
     checkin: blankCheckin(),
     rev: [],
@@ -48,7 +55,13 @@ export function normalizeDay(d?: Partial<DayLog> | null): DayLog {
   const b = blankDay();
   if (!d) return b;
   return {
+    v: typeof d.v === "number" ? d.v : 1,
     prayers: { ...(d.prayers ?? {}) },
+    late: Object.fromEntries(Object.entries(d.late ?? {}).filter(([, l]) => l && typeof l.m === "number").map(([k, l]) => [k, { ...l }])),
+    khushu: Object.fromEntries(Object.entries(d.khushu ?? {}).filter(([, x]) => x).map(([k, x]) => [k, { ...x, what: [...(x.what ?? [])], why: [...(x.why ?? [])] }])),
+    tathbit: { ...b.tathbit, ...(d.tathbit ?? {}) },
+    workout: { ...b.workout, ...(d.workout ?? {}), kinds: [...(d.workout?.kinds ?? [])] },
+    sc: { relapse: !!d.sc?.relapse, urges: (d.sc?.urges ?? []).map((u) => ({ ...u, trig: [...(u.trig ?? [])] })) },
     why: Object.fromEntries(Object.entries(d.why ?? {}).filter(([, w]) => w && reasonOf(w.r)).map(([k, w]) => [k, { ...w }])) as Partial<Record<PrayerId, PrayerWhy>>,
     checkin: { ...blankCheckin(), ...(d.checkin ?? {}) },
     rev: Array.isArray(d.rev) ? d.rev.filter((r) => r && r.from > 0 && r.to >= r.from).map((r) => ({ from: r.from, to: r.to })) : [],
@@ -74,12 +87,18 @@ export function workPoints(hours: number) {
   return h * 8;
 }
 
+/** Points for one prayer under the day's rules. */
+export function prayerPoints(d: DayLog, id: PrayerId) {
+  if (excused(d.why[id])) return 8;
+  const v = d.prayers[id];
+  if (v == null) return 0;
+  if ((d.v ?? 1) < 2 || v === 2) return PRAYER_POINTS[v];
+  if (d.why[id]?.r === "nature") return v === 1 ? 6 : 4;
+  return v === 1 ? latePoints(d.late[id]) : 0;
+}
+
 export function scoreDay(d: DayLog): Scores {
-  const p = PRAYERS.reduce((sum, { id }) => {
-    if (excused(d.why[id])) return sum + 8;
-    const v = d.prayers[id];
-    return sum + (v == null ? 0 : PRAYER_POINTS[v]);
-  }, 0);
+  const p = PRAYERS.reduce((sum, { id }) => sum + prayerPoints(d, id), 0);
   const q = d.quran;
   const qs =
     (q.mem >= 2 ? 15 : q.mem === 1 ? 7 : 0) +
@@ -88,7 +107,9 @@ export function scoreDay(d: DayLog): Scores {
     (q.mulkSubh ? 2.5 : 0) +
     (q.mulkMaghrib ? 2.5 : 0);
   const w = workPoints(d.work.hours);
-  const s = d.steps ? Math.min(d.steps / STEP_GOAL, 1) * 10 : 0;
+  const steps = d.steps ? Math.min(d.steps / STEP_GOAL, 1) : 0;
+  // Rules v2: health = steps 5 + workout 5. Older days: steps alone were 10.
+  const s = (d.v ?? 1) >= 2 ? steps * 5 + (d.workout?.done ? 5 : 0) : steps * 10;
   return { p, q: qs, w, s, total: p + qs + w + s, bonus: bonusPoints(d) };
 }
 

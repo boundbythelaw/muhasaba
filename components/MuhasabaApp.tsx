@@ -16,6 +16,8 @@ import WalkCard from "./WalkCard";
 import BonusCard from "./BonusCard";
 import WorkCard from "./WorkCard";
 import CheckinCard, { CheckinNudge } from "./CheckinCard";
+import SelfControlCard from "./SelfControl";
+import WhatsNew from "./WhatsNew";
 
 function ShukrCard() {
   const { day, update, locked, requestUnlock, cur } = useStore();
@@ -61,6 +63,7 @@ function Shell() {
   const jump = (p: Pillar | "journal" | "c") => {
     if (p === "journal") { setView("journal"); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     const go = () => {
+      dispatchEvent(new CustomEvent("muhasaba-open", { detail: `sec-${p}` }));
       const el = document.getElementById(`sec-${p}`);
       if (!el) return;
       el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -92,6 +95,7 @@ function Shell() {
               <WalkCard />
               <BonusCard />
               <CheckinCard />
+              <SelfControlCard />
               <ShukrCard />
               <p className="foot">{tr("Swipe the top card or use ‹ › to move between days. Everything saves as you tap.")}</p>
             </>
@@ -106,6 +110,7 @@ function Shell() {
       <UnlockSheet />
       <Welcome />
       <CheckinNudge />
+      <WhatsNew />
       <FxLayer />
     </div>
   );

@@ -35,7 +35,7 @@ export const STEP_SLIDER_MAX = 20000;
 
 export const MAX = { p: 40, q: 30, w: 20, s: 10 } as const;
 export type Pillar = keyof typeof MAX;
-export const PILLAR_NAME: Record<Pillar, string> = { p: "Salah", q: "Qur'an", w: "Productive", s: "Walk" };
+export const PILLAR_NAME: Record<Pillar, string> = { p: "Salah", q: "Qur'an", w: "Productive", s: "Health" };
 
 /** 127 pages memorised before 5 Nov 2026, so that day's portion is pages 128–129. */
 export const DEFAULT_PREFS: import("./types").Prefs = {
@@ -55,9 +55,10 @@ export const MOHAMED_PREFS = { basePage: 127, lang: "en" as const, name: "Mohame
 /** Reasons for being late or missing the mosque. Excuses keep the full 8 points when the prayer was prayed properly. */
 export const REASONS: { id: import("./types").PrayerReason; label: string; excuse: boolean; women?: boolean; okLabel?: string }[] = [
   { id: "travel", label: "Travelling", excuse: true, okLabel: "Prayed it as the Sunnah allows (shortened / combined, on time)" },
-  { id: "ill", label: "Ill", excuse: true, okLabel: "Prayed it as I was able, on time" },
+  { id: "ill", label: "Ill / stomach ache", excuse: true, okLabel: "Prayed it as I was able, on time" },
   { id: "period", label: "Menstruation", excuse: true, women: true },
   { id: "weather", label: "Rain / danger", excuse: true, okLabel: "Prayed it on time where I was" },
+  { id: "nature", label: "Call of nature", excuse: false },
   { id: "slept", label: "Overslept", excuse: false },
   { id: "phone", label: "Phone / scrolling", excuse: false },
   { id: "work", label: "Work", excuse: false },

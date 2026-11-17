@@ -34,6 +34,7 @@ const COLUMNS = [
   ["Day", "day", 52],
   ["Score", "score", 64],
   ["Day type", "dayType", 124],
+  ["Rules", "rules", 52],
   ["Salah /40", "salah", 76],
   ["Qur'an /30", "quran", 80],
   ["Productive /20", "work", 84],
@@ -44,6 +45,8 @@ const COLUMNS = [
   ["Maghrib", "maghrib", 112],
   ["Isha", "isha", 112],
   ["Why late / missed", "reasons", 220],
+  ["Khushūʿ %", "khushu", 70],
+  ["Khushūʿ notes", "khushuNote", 260],
   ["Excused", "excused", 66],
   ["Pages memorised", "pages", 84],
   ["Portion", "portion", 82],
@@ -55,10 +58,12 @@ const COLUMNS = [
   ["Mulk (Maghrib)", "mulkMaghrib", 100],
   ["Revised pages", "revised", 70],
   ["Revision", "revRanges", 120],
+  ["Tathbīt", "tathbit", 130],
   ["Hours", "hours", 60],
   ["Topics", "topics", 200],
   ["What was productive", "note", 280],
   ["Steps", "steps", 76],
+  ["Workout", "workout", 150],
   ["Slept", "slept", 62],
   ["Woke", "woke", 62],
   ["Sleep (h)", "sleepH", 66],
@@ -68,6 +73,7 @@ const COLUMNS = [
   ["Slipped", "slip", 66],
   ["Tawbah", "tawbah", 66],
   ["Check-in ✓", "checkin", 76],
+  ["Self-control", "sc", 150],
   ["Bonus ✦", "bonus", 70],
   ["Bonus deeds", "bonusList", 220],
   ["Journal", "journal", 96],
@@ -75,7 +81,32 @@ const COLUMNS = [
   ["Last update", "updated", 140],
 ];
 /** Bumped whenever COLUMNS change. The app re-sends every day when it sees a new number. */
-const SCHEMA = 3;
+const SCHEMA = 4;
+
+/**
+ * Major updates, newest first (same list as the app's "What's new"). Written to the Updates tab so you can
+ * see when the scoring changed and why. Days keep the rules they were logged with (the "Rules" column).
+ */
+const UPDATES = [
+  { v: 2, date: "2026-11-18", title: "Khushūʿ, tathbīt, workout and self-control",
+    changes: ["Salah: one prayer at a time, with a step-by-step popup (when you joined, why, khushūʿ)", "Khushūʿ after each prayer", "Late: how many rakʿahs you missed", "New reasons: Call of nature, Ill / stomach ache", "Qurʾān: tathbīt (10× memorised + 10× read, one page a day)", "Health: walk + home workout", "Self-control: private streak, urge help, milestones to Ramadan", "Calmer screen: every card folds"],
+    scoring: ["Late: right after the takbīr 6 · missed less than half 4 · exactly half 2 · more than half 0", "Call of nature: late 6 · at home 4", "Health 10 = steps 5 + workout 5 (before: steps 10)", "Tathbīt = ✦ bonus up to +5; khushūʿ and self-control not scored", "Days before 18 Nov 2026 keep their old scores (Rules = 1)"] },
+  { v: 1, date: "2026-11-05", title: "First version",
+    changes: ["Salah 40 · Qurʾān 30 · Work/Productivity 20 · Walk 10"],
+    scoring: ["Late to the mosque = 4, before the takbīr = 8", "Walk: 8,000 steps = 10"] },
+];
+
+function buildUpdates() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName("Updates") || ss.insertSheet("Updates");
+  sh.clear();
+  sh.setHiddenGridlines(true);
+  sh.getRange(1, 1, 1, 5).setValues([["Version", "From", "What changed", "Scoring changes", "Title"]]).setFontWeight("bold").setFontColor("#FFFFFF").setBackground(C.night);
+  const rows = UPDATES.map((u) => [`v${u.v}`, u.date, u.changes.map((x) => "• " + x).join("\n"), u.scoring.map((x) => "• " + x).join("\n"), u.title]);
+  sh.getRange(2, 1, rows.length, 5).setValues(rows).setVerticalAlignment("top").setWrap(true);
+  [70, 100, 420, 420, 260].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  sh.setFrozenRows(1);
+}
 /** Old header names, so a renamed column keeps its data when the Log is migrated. */
 const HEADER_ALIASES = { "Productive /20": ["Work /20"], "Hours": [], "Topics": [], "What was productive": ["What moved forward"] };
 const INSIGHTS = "Insights";
@@ -944,6 +975,7 @@ function setup() {
   ScriptApp.getProjectTriggers().filter((t) => t.getHandlerFunction() === "tick").forEach((t) => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger("tick").timeBased().everyHours(1).create();
   buildInsights();
+  buildUpdates();
   SpreadsheetApp.getActive().setActiveSheet(SpreadsheetApp.getActive().getSheetByName(DASH));
 }
 
@@ -1064,7 +1096,9 @@ function formatLog(sh) {
   sh.getRange(2, col("preview"), MAX_ROWS - 1, 4).insertCheckboxes();
   sh.getRange(2, col("slip"), MAX_ROWS - 1, 3).insertCheckboxes();
   body("sleepH").setNumberFormat("0.#").setHorizontalAlignment("center");
-  ["energy", "mood", "excused", "revised"].forEach((k) => body(k).setHorizontalAlignment("center").setNumberFormat("0"));
+  ["energy", "mood", "excused", "revised", "rules"].forEach((k) => body(k).setHorizontalAlignment("center").setNumberFormat("0"));
+  body("khushu").setNumberFormat('0"%"').setHorizontalAlignment("center");
+  ["khushuNote", "workout", "tathbit", "sc"].forEach((k) => body(k).setWrap(true));
   ["energy", "mood"].forEach((k) => body(k).setNumberFormat('0"/5"'));
   ["phone", "reasons", "revRanges"].forEach((k) => body(k).setNumberFormat("@"));
   ["slept", "woke"].forEach((k) => body(k).setNumberFormat("HH:mm").setHorizontalAlignment("center"));
@@ -1417,8 +1451,27 @@ function buildInsights() {
   block("Why you were late or missed the mosque", rKeys.length ? "" : "Pick a reason on the Salah card when you're late or miss the mosque, and it adds up here.",
     ["Reason", "Times", "Most often at", "Excuse?"], rKeys.map((r) => {
       const at = reasonCount[r].at, top2 = Object.keys(at).sort((a, b) => at[b] - at[a])[0];
-      return [r, reasonCount[r].n, `${top2} (${at[top2]}×)`, ["Travelling", "Ill", "Menstruation", "Rain / danger"].indexOf(r) >= 0 ? "Yes" : "No"];
+      return [r, reasonCount[r].n, `${top2} (${at[top2]}×)`, ["Travelling", "Ill", "Ill / stomach ache", "Menstruation", "Rain / danger"].indexOf(r) >= 0 ? "Yes" : r === "Call of nature" ? "Partly" : "No"];
     }));
+
+  /* ---- Khushūʿ ---- */
+  const kd = days.filter((d) => typeof d.khushu === "number");
+  if (kd.length < 3) needs("Khushūʿ", kd.length, 3, "days with khushūʿ logged");
+  else {
+    const per = PR.map((p) => {
+      const hits = kd.map((d) => new RegExp(PRNAME[p] + ": (present|on and off|mostly elsewhere)").exec(String(d.khushuNote || ""))).filter(Boolean).map((m) => ({ "present": 2, "on and off": 1, "mostly elsewhere": 0 })[m[1]]);
+      return [PRNAME[p], hits.length, hits.length ? Math.round((hits.reduce((a, b) => a + b, 0) / (hits.length * 2)) * 100) + "%" : "–", pc(hits.filter((x) => x === 2).length, hits.length)];
+    });
+    block("Khushūʿ by prayer", `Average focus over ${kd.length} days: ${r0(avgOf(kd.map((d) => d.khushu)))}%.`, ["Prayer", "Logged", "Focus", "Fully present"], per);
+    const count = (list) => { const c = {}; kd.forEach((d) => list.forEach((w) => { if (String(d.khushuNote || "").indexOf(w) >= 0) c[w] = (c[w] || 0) + 1; })); return Object.keys(c).sort((a, b) => c[b] - c[a]).map((w) => [w, c[w]]); };
+    block("What takes your mind away", "", ["Thought", "Times"], count(["Work / business", "Family", "Phone / social media", "Worries", "Future plans", "Food", "Studies", "A conversation", "Nothing specific"]));
+    block("Why focus slipped", "", ["Cause", "Times"], count(["Tired", "Rushed", "Noise / people", "Hungry", "Came in late", "Didn't prepare", "Phone just before", "Long day"]));
+    const ksleep = (f) => r0(avgOf(kd.filter(f).map((d) => d.khushu)));
+    block("Khushūʿ and your day", "", ["", "Avg focus"], [
+      ["After 7 h+ of sleep", ksleep((d) => d.sleepH >= 7) + "%"], ["After under 6 h", ksleep((d) => d.sleepH != null && d.sleepH < 6) + "%"],
+      ["Phone: none", ksleep((d) => d.phone === "None") + "%"], ["Phone: a lot", ksleep((d) => d.phone === "A lot") + "%"],
+    ]);
+  }
 
   /* ---- Qur'an ---- */
   const lastP = days.slice().reverse().find((d) => d.portion);

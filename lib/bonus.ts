@@ -3,6 +3,9 @@ import { REV_PTS_MAX, REV_PTS_PER_PAGE } from "./constants";
 
 const revCount = (d: DayLog) => (d.rev ?? []).reduce((n, r) => n + Math.max(0, r.to - r.from + 1), 0);
 export const revBonus = (d: DayLog) => Math.min(REV_PTS_MAX, revCount(d) * REV_PTS_PER_PAGE);
+/** Tathbīt: 10× memorised + 10× read = +5 (partial counts). */
+export const TATHBIT_PTS = 5;
+export const tathbitBonus = (d: DayLog) => (d.tathbit?.page ? ((Math.min(10, d.tathbit.mem) + Math.min(10, d.tathbit.read)) / 20) * TATHBIT_PTS : 0);
 
 /** Voluntary acts: they only ever add, and are kept apart from the /100 score. */
 export interface BonusLog {
@@ -36,7 +39,7 @@ export const BONUS_ITEMS: { id: Exclude<keyof BonusLog, "rawatib">; label: strin
 ];
 
 export const RAWATIB_PTS = 5;
-export const BONUS_MAX = BONUS_ITEMS.reduce((n, b) => n + b.pts, 0) + RAWATIB_PTS + REV_PTS_MAX;
+export const BONUS_MAX = BONUS_ITEMS.reduce((n, b) => n + b.pts, 0) + RAWATIB_PTS + REV_PTS_MAX + 5;
 
 export function blankBonus(): BonusLog {
   return { tahajjud: false, witr: false, duha: false, adhkarAm: false, adhkarPm: false, fast: false,
@@ -52,7 +55,7 @@ export const rakatDone = (b: BonusLog) => RAWATIB.reduce((n, r) => n + (b.rawati
 
 export function bonusPoints(d: DayLog) {
   const b = d.bonus;
-  return BONUS_ITEMS.reduce((n, it) => n + (b[it.id] ? it.pts : 0), 0) + (rakatDone(b) / 12) * RAWATIB_PTS + revBonus(d);
+  return BONUS_ITEMS.reduce((n, it) => n + (b[it.id] ? it.pts : 0), 0) + (rakatDone(b) / 12) * RAWATIB_PTS + revBonus(d) + tathbitBonus(d);
 }
 
 /** Plain-English list for the sheet, e.g. "Tahajjud, Witr, Rawātib 8/12". */
@@ -60,6 +63,7 @@ export function bonusList(d: DayLog) {
   const out = BONUS_ITEMS.filter((it) => d.bonus[it.id]).map((it) => it.label);
   const r = rakatDone(d.bonus);
   if (r) out.push(`Rawātib ${r}/12`);
+  if (d.tathbit?.page && (d.tathbit.mem || d.tathbit.read)) out.push(`Tathbīt p.${d.tathbit.page} ${d.tathbit.mem}+${d.tathbit.read}/20`);
 
   return out.join(", ");
 }

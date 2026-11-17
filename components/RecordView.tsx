@@ -10,6 +10,7 @@ import { useStore } from "@/lib/store";
 import SheetCard from "./SheetCard";
 import { ProfileCard } from "./Profile";
 import InsightsCard from "./InsightsCard";
+import { UpdatesCard } from "./WhatsNew";
 import { Bar, tap } from "./ui";
 
 export default function RecordView() {
@@ -114,6 +115,7 @@ export default function RecordView() {
       </section>
 
       <InsightsCard />
+      <UpdatesCard />
 
       <section className="card">
         <div className="ch"><h2>{tr("This week by pillar")}</h2></div>

@@ -1,4 +1,5 @@
 "use client";
+import { haptic } from "@/lib/fx";
 import { tr } from "@/lib/i18n";
 import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion, useTransform } from "framer-motion";
 import { useEffect, useId, useState, type MouseEvent, type ReactNode } from "react";
@@ -103,13 +104,20 @@ export function Bar({ pct, max }: { pct: number; max?: boolean }) {
 }
 
 /* ---------- Card that eases in on scroll and folds away once complete ---------- */
-export function CardShell({ id, title, ar, value, max, done, summary, children, className = "" }: {
-  id: string; title: string; ar?: string; value: number; max: number; done: boolean; summary?: string; children: ReactNode; className?: string;
+export function CardShell({ id, title, ar, value, max, done, summary, pending, badge, startOpen = false, children, className = "" }: {
+  id: string; title: string; ar?: string; value: number; max: number; done: boolean; summary?: string;
+  /** Folded line while not complete (defaults to the score). */ pending?: string;
+  /** Replaces the score badge. */ badge?: ReactNode;
+  startOpen?: boolean; children: ReactNode; className?: string;
 }) {
-  // Folded only if the section was already complete when the day was opened, never mid-tap.
-  const [open, setOpen] = useState(!done);
-  const setManual = setOpen;
-  useEffect(() => { if (!done) setOpen(true); }, [done]);
+  // Every card starts folded (one line), and opens with a tap or when "Next up" points to it.
+  const [open, setOpen] = useState(startOpen);
+  const setManual = (o: boolean) => { setOpen(o); haptic(5); };
+  useEffect(() => {
+    const h = (e: Event) => { if ((e as CustomEvent<string>).detail === id) setOpen(true); };
+    addEventListener("muhasaba-open", h);
+    return () => removeEventListener("muhasaba-open", h);
+  }, [id]);
   return (
     <motion.section
       className={`card ${done ? "done" : ""} ${open ? "" : "folded"} ${className}`} id={id}
@@ -119,7 +127,7 @@ export function CardShell({ id, title, ar, value, max, done, summary, children, 
       <button className="ch cardhead" onClick={() => setManual(!open)} aria-expanded={open} aria-controls={`${id}-body`}>
         <h2>{tr(title)}{ar && <span className="ar">{ar}</span>}</h2>
         <span className="headright">
-          <Badge value={value} max={max} />
+          {badge ?? <Badge value={value} max={max} />}
           <motion.svg className="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" animate={{ rotate: open ? 180 : 0 }}><path d="m6 9 6 6 6-6" /></motion.svg>
         </span>
       </button>
@@ -133,7 +141,7 @@ export function CardShell({ id, title, ar, value, max, done, summary, children, 
           <motion.p key="sum" className="donestrip" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
             {done
               ? <><span className="tick">✓</span> {summary ?? tr("Complete")} <span className="muted">· {tr("tap to open")}</span></>
-              : <span className="muted num">{fmt(value)} / {max} · {tr("tap to open")}</span>}
+              : <span className="muted">{pending ?? `${fmt(value)} / ${max}`} · {tr("tap to open")}</span>}
           </motion.p>
         )}
       </AnimatePresence>
