@@ -130,10 +130,12 @@ function UrgeSheet({ open, onClose, onSlip }: { open: boolean; onClose: () => vo
         <div className="whychips">
           {TRIGGERS.map((x) => <motion.button key={x} {...tap} className={`whychip ${trig.includes(x) ? "on" : ""}`} onClick={() => setTrig((a) => (a.includes(x) ? a.filter((y) => y !== x) : [...a, x]))}>{tr(x)}</motion.button>)}
         </div>
+        <div className="sheet-foot">
         <motion.button className="btn big" {...tap} onClick={(e) => { void log(true).then(() => { burst(e.clientX, e.clientY); haptic(30); toast(tr("You beat it. That's real strength, by Allah's help.")); onClose(); }); }}>
           {tr("It passed ✓")}
         </motion.button>
         <motion.button className="btn ghost" {...tap} onClick={() => { void log(false).then(onSlip); }}>{tr("I didn't make it")}</motion.button>
+        </div>
       </div>
     </BottomSheet>
   );

@@ -163,7 +163,7 @@ function TathbitPanel() {
   return (
     <div className={`tathbit ${done ? "done" : ""}`}>
       <div className="ch">
-        <div className="lab">{tr("Tathbīt · re-memorising")} <span className="ar" style={{ fontSize: 15 }}>تثبيت</span></div>
+        <div className="tb-title"><b>{tr("Tathbīt")}</b> <span className="ar">تثبيت</span><small>{tr("re-memorising")}</small></div>
         <div className="tb-page">
           <button aria-label={tr("Previous page")} onClick={() => setPage(page - 1)}>‹</button>
           <b className="num">{tr("Page {p}", { p: page })}</b>

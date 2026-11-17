@@ -1,6 +1,6 @@
 "use client";
 import { loc, num, tr } from "@/lib/i18n";
-import { AnimatePresence, motion, type PanInfo } from "framer-motion";
+import { AnimatePresence, motion, type PanInfo , useDragControls } from "framer-motion";
 import { useEffect, useState, type ReactNode } from "react";
 import { STEP_GOAL } from "@/lib/constants";
 import { longDate } from "@/lib/dates";
@@ -13,6 +13,8 @@ import { tap } from "./ui";
 /* ---------- Bottom sheet: slides up, drag down or tap outside to close ---------- */
 export function BottomSheet({ open, onClose, children, label }: { open: boolean; onClose: () => void; children: ReactNode; label: string }) {
   useBackClose(open, onClose);
+  // Dragging down closes the sheet, but only from the handle at the top: the rest of the sheet scrolls normally.
+  const drag = useDragControls();
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -28,10 +30,10 @@ export function BottomSheet({ open, onClose, children, label }: { open: boolean;
             className="sheet" role="dialog" aria-modal="true" aria-label={tr(label)}
             initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
             transition={{ type: "spring", stiffness: 420, damping: 38 }}
-            drag="y" dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0.05, bottom: 0.6 }}
+            drag="y" dragListener={false} dragControls={drag} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0.05, bottom: 0.6 }}
             onDragEnd={(_: unknown, i: PanInfo) => { if (i.offset.y > 110 || i.velocity.y > 600) onClose(); }}
           >
-            <div className="sheet-grip" aria-hidden="true" />
+            <div className="sheet-handle" onPointerDown={(e) => drag.start(e)} aria-hidden="true"><div className="sheet-grip" /></div>
             {children}
           </motion.div>
         </>

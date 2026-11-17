@@ -88,7 +88,7 @@ export default function RecordView() {
     <>
       <section className="stats">
         {stats.map(([v, l, flame], i) => (
-          <motion.div key={l} className={`stat ${flame ? "flame" : ""}`} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}>
+          <motion.div key={l} className={`stat ${flame ? "gold" : ""}`} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}>
             <b className="num">{v}</b><span>{l}</span>
           </motion.div>
         ))}

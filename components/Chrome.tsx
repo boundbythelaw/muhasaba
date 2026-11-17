@@ -1,4 +1,5 @@
 "use client";
+import { MAX } from "@/lib/constants";
 import { getName, tr } from "@/lib/i18n";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
@@ -197,8 +198,15 @@ export function MiniScore() {
       {show && (
         <motion.button className="mini" aria-label={tr("Back to top")} onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
           initial={{ y: -80 }} animate={{ y: 0 }} exit={{ y: -80 }} transition={{ type: "spring", stiffness: 380, damping: 30 }}>
-          <b className="num">{Math.round(scores.total)}</b>
-          <span>{cur === todayKey() ? tr("Today") : shortDate(cur)} · {grade(scores.total)}</span>
+          <span className="mini-in">
+            <b className="num">{Math.round(scores.total)}</b>
+            <span className="mini-t">{cur === todayKey() ? tr("Today") : shortDate(cur)} · {grade(scores.total)}</span>
+            <span className="mini-bars" aria-hidden="true">
+              {(["p", "q", "w", "s"] as const).map((k) => (
+                <i key={k} className={`mb-${k}`}><motion.em initial={false} animate={{ width: `${(scores[k] / MAX[k]) * 100}%` }} /></i>
+              ))}
+            </span>
+          </span>
         </motion.button>
       )}
     </AnimatePresence>
