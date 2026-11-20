@@ -92,6 +92,9 @@ export function buildRow(date: string, days: Record<string, DayLog>, prefs: Pref
   }).join(" · ");
   row.workout = !v2 ? na : d.workout.done ? ["✓", d.workout.minutes ? `${d.workout.minutes} min` : "", d.workout.kinds.join(", ")].filter(Boolean).join(" · ") : "";
   row.tathbit = !v2 ? na : d.tathbit.page ? `p. ${d.tathbit.page} · ${d.tathbit.mem}/10 + ${d.tathbit.read}/10` : "";
+  row.salawat = !v2 ? na : d.dhikr.salawat || null;
+  row.tasbih = !v2 ? na : d.dhikr.tasbih || null;
+  row.music = d.quran.music == null ? (v2 ? null : na) : ["None", "A little", "Yes"][d.quran.music];
   const ur = d.sc.urges;
   row.sc = !v2 ? na : ur.length || d.sc.relapse ? `${ur.filter((u) => u.ok).length}/${ur.length} urges beaten${d.sc.relapse ? " · slipped" : ""}` : "";
   const c = d.checkin;

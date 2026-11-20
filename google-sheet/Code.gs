@@ -52,6 +52,7 @@ const COLUMNS = [
   ["Portion", "portion", 82],
   ["Minutes", "minutes", 70],
   ["Difficulty", "difficulty", 84],
+  ["Music day before", "music", 90],
   ["Preview", "preview", 66],
   ["1 juz", "juz", 56],
   ["Mulk (Subh)", "mulkSubh", 84],
@@ -76,12 +77,14 @@ const COLUMNS = [
   ["Self-control", "sc", 150],
   ["Bonus ✦", "bonus", 70],
   ["Bonus deeds", "bonusList", 220],
+  ["Ṣalawāt", "salawat", 70],
+  ["Tasbīḥ", "tasbih", 70],
   ["Journal", "journal", 96],
   ["The day in a line", "summary", 300],
   ["Last update", "updated", 140],
 ];
 /** Bumped whenever COLUMNS change. The app re-sends every day when it sees a new number. */
-const SCHEMA = 4;
+const SCHEMA = 5;
 
 /**
  * Major updates, newest first (same list as the app's "What's new"). Written to the Updates tab so you can
@@ -974,6 +977,8 @@ function setup() {
   // One hourly heartbeat: nightly reminder email, Insights refresh, Sunday weekly letter.
   ScriptApp.getProjectTriggers().filter((t) => t.getHandlerFunction() === "tick").forEach((t) => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger("tick").timeBased().everyHours(1).create();
+  ScriptApp.getProjectTriggers().filter((t) => t.getHandlerFunction() === "onInsightsEdit").forEach((t) => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger("onInsightsEdit").forSpreadsheet(SpreadsheetApp.getActive()).onEdit().create();
   buildInsights();
   buildUpdates();
   SpreadsheetApp.getActive().setActiveSheet(SpreadsheetApp.getActive().getSheetByName(DASH));
@@ -1194,7 +1199,7 @@ function readDays() {
     o.key = dateKey(o.date, tz);
     o.d = o.date instanceof Date ? o.date : new Date(o.key);
     o.score = Number(o.score) || 0;
-    ["salah", "quran", "work", "walk", "bonus", "pages", "minutes", "hours", "steps", "sleepH", "energy", "mood", "revised", "excused"].forEach((k) => {
+    ["salah", "quran", "work", "walk", "bonus", "pages", "minutes", "hours", "steps", "sleepH", "energy", "mood", "revised", "excused", "salawat", "tasbih"].forEach((k) => {
       o[k] = o[k] === "" || o[k] == null ? null : Number(o[k]);
     });
     o.bed = minutesOf(o.slept);
@@ -1217,52 +1222,173 @@ function shiftKey(key, n) {
  * Rebuilds the Insights tab: everything worth knowing about your days, computed fresh from the Log.
  * Runs every night (via `tick`) and from the Muhasaba menu.
  */
+const PERIODS = ["All time", "Last 90 days", "Last 30 days", "Last 7 days"];
+const PERIOD_CELL = "D4";
+
+/** Changing the period dropdown on the Insights tab rebuilds it (installed by setup). */
+function onInsightsEdit(e) {
+  if (!e || !e.range) return;
+  const sh = e.range.getSheet();
+  if (sh.getName() === INSIGHTS && e.range.getA1Notation() === PERIOD_CELL) buildInsights();
+}
+
+/**
+ * Rebuilds the Insights tab: a banner with a period dropdown, headline tiles, then sections of tables with
+ * colour scales and a chart under each one that has numbers worth seeing. Computed fresh from the Log.
+ */
 function buildInsights() {
   const ss = SpreadsheetApp.getActive();
   let sh = ss.getSheetByName(INSIGHTS);
+  let period = PERIODS[0];
+  if (sh) { const v = String(sh.getRange(PERIOD_CELL).getValue() || ""); if (PERIODS.indexOf(v) >= 0) period = v; }
   if (!sh) sh = ss.insertSheet(INSIGHTS, 1);
   sh.getCharts().forEach((c) => sh.removeChart(c));
+  const f0 = sh.getFilter(); if (f0) f0.remove();
+  sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
   sh.clear();
   sh.clearConditionalFormatRules();
+  sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).clearDataValidations();
   sh.setHiddenGridlines(true);
   sh.setTabColor(C.green);
-  if (sh.getMaxColumns() < 12) sh.insertColumnsAfter(sh.getMaxColumns(), 12 - sh.getMaxColumns());
-  [24, 200, 110, 110, 110, 110, 110, 110, 24, 110, 110, 110].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  sh.setFrozenRows(0);
+  const NC = 10; // A margin, B..I content, J margin
+  if (sh.getMaxColumns() < NC) sh.insertColumnsAfter(sh.getMaxColumns(), NC - sh.getMaxColumns());
+  if (sh.getMaxRows() < 600) sh.insertRowsAfter(sh.getMaxRows(), 600 - sh.getMaxRows());
+  [18, 170, 112, 112, 112, 112, 112, 112, 112, 18].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  sh.setRowHeights(1, sh.getMaxRows(), 24);
+  sh.getRange(1, 1, sh.getMaxRows(), NC).setFontFamily("Roboto").setFontSize(10).setVerticalAlignment("middle").setFontColor("#2A2840");
+  const W = 8; // content columns B..I
+  const CHART_W = 170 + 112 * 7 - 10;
 
-  const days = readDays();
+  let days = readDays();
   const ctx = appCtx();
-  let row = 2;
-  sh.getRange(row, 2, 1, 7).merge().setValue("Insights").setFontSize(26).setFontWeight("bold").setFontColor(C.night);
-  row++;
-  sh.getRange(row, 2, 1, 7).merge()
-    .setValue(`${days.length} days logged · updated ${Utilities.formatDate(new Date(), ctx.tz, "EEE d MMM yyyy, HH:mm")} · refreshes every night`)
-    .setFontColor("#6A6688");
-  row += 2;
+  const today0 = Utilities.formatDate(new Date(), ctx.tz, "yyyy-MM-dd");
+  const cutDays = { "Last 90 days": 90, "Last 30 days": 30, "Last 7 days": 7 }[period];
+  if (cutDays) days = days.filter((d) => d.key > shiftKey(today0, -cutDays));
 
-  /** Writes one titled table. `rows` are arrays; `marks` colours given rows: { index: "good" | "bad" }. */
-  const block = (title, note, head, rows, marks) => {
-    sh.getRange(row, 2, 1, 7).merge().setValue(title).setFontSize(15).setFontWeight("bold").setFontColor(C.night);
+  // Banner
+  sh.setRowHeight(1, 10);
+  sh.getRange(2, 2, 3, W).setBackground(C.night);
+  sh.setRowHeight(2, 46);
+  sh.getRange(2, 2, 1, W).merge().setValue("Insights").setFontSize(24).setFontWeight("bold").setFontColor("#FFFFFF").setFontFamily("Montserrat").setVerticalAlignment("bottom");
+  sh.getRange(3, 2, 1, W).merge()
+    .setValue(`${days.length} days · updated ${Utilities.formatDate(new Date(), ctx.tz, "EEE d MMM, HH:mm")} · rebuilt every night`)
+    .setFontColor("#BDB8E6").setFontSize(10);
+  sh.setRowHeight(4, 32);
+  sh.getRange(4, 2, 1, 2).merge().setValue("Period ▸").setFontColor("#FFFFFF").setFontWeight("bold").setHorizontalAlignment("right");
+  sh.getRange(PERIOD_CELL).setValue(period).setBackground("#FFFFFF").setFontColor(C.night).setFontWeight("bold").setHorizontalAlignment("center")
+    .setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(PERIODS, true).setAllowInvalid(false).build());
+  sh.getRange(4, 5, 1, W - 3).merge().setValue("← change it and the whole tab recalculates").setFontColor("#BDB8E6").setFontSize(9).setFontStyle("italic");
+  let row = 6;
+
+  const SECTION_COLORS = { violet: [C.violet, C.violetSoft], gold: [C.gold, C.goldSoft], green: [C.green, C.greenSoft], red: [C.red, C.redSoft] };
+  let tone = SECTION_COLORS.violet;
+
+  /** A coloured band that opens a group of tables. */
+  const section = (icon, title, color) => {
+    tone = SECTION_COLORS[color || "violet"];
     row++;
-    if (note) { sh.getRange(row, 2, 1, 7).merge().setValue(note).setFontColor("#6A6688").setFontStyle("italic").setWrap(true); row++; }
-    if (!rows || !rows.length) { row++; return; }
+    sh.setRowHeight(row, 38);
+    sh.getRange(row, 2).setBackground(tone[0]).setValue(icon).setFontSize(16).setHorizontalAlignment("center");
+    sh.getRange(row, 3, 1, W - 1).merge().setValue(title).setBackground(tone[1]).setFontSize(15).setFontWeight("bold").setFontColor(C.night).setFontFamily("Montserrat");
+    row += 2;
+  };
+
+  /** Headline tiles, four per row. Each: [label, value, sub, colour]. */
+  const tiles = (list) => {
+    for (let i = 0; i < list.length; i += 4) {
+      list.slice(i, i + 4).forEach((t, j) => {
+        const c = 2 + j * 2;
+        const col = SECTION_COLORS[t[3] || "violet"];
+        const box = sh.getRange(row, c, 3, 2);
+        box.setBackground(col[1]).setBorder(true, true, true, true, false, false, "#FFFFFF", SpreadsheetApp.BorderStyle.SOLID_THICK);
+        sh.getRange(row, c, 1, 2).merge().setValue(String(t[0]).toUpperCase()).setFontSize(8).setFontWeight("bold").setFontColor("#6A6688").setVerticalAlignment("bottom");
+        sh.getRange(row + 1, c, 1, 2).merge().setValue(t[1] == null ? "–" : t[1]).setFontSize(22).setFontWeight("bold").setFontColor(col[0]).setFontFamily("Montserrat").setHorizontalAlignment("left");
+        sh.getRange(row + 2, c, 1, 2).merge().setValue(t[2] || "").setFontSize(9).setFontColor("#6A6688").setVerticalAlignment("top");
+      });
+      sh.setRowHeight(row, 22); sh.setRowHeight(row + 1, 38); sh.setRowHeight(row + 2, 22);
+      row += 3;
+    }
+    row++;
+  };
+
+  /**
+   * One titled table. `marks` colours rows { index: "good" | "bad" }. `opt.scale` lists column indexes that get
+   * a red→green colour scale (`opt.reverse` for lower-is-better). `opt.chart` draws a chart under the table:
+   * { type: "column" | "bar" | "line" | "pie", cols: [column indexes], title, max }.
+   */
+  const block = (title, note, head, rows, marks, opt) => {
+    opt = opt || {};
+    sh.getRange(row, 2, 1, W).merge().setValue(title).setFontSize(12.5).setFontWeight("bold").setFontColor(C.night);
+    sh.setRowHeight(row, 28);
+    row++;
+    if (note) {
+      sh.getRange(row, 2, 1, W).merge().setValue(note).setFontColor("#6A6688").setFontStyle("italic").setWrap(true).setVerticalAlignment("top");
+      sh.setRowHeight(row, note.length > 120 ? 40 : 22);
+      row++;
+    }
+    if (!rows || !rows.length) { row++; return null; }
     const w = head.length;
-    sh.getRange(row, 2, 1, w).setValues([head]).setFontWeight("bold").setFontColor("#FFFFFF").setBackground(C.night);
+    const span = (i) => (i === w - 1 ? W - (w - 1) : 1); // the last column stretches to the right edge
+    sh.getRange(row, 2, 1, W).setBackground(tone[1]);
+    head.forEach((h, i) => { const r = sh.getRange(row, 2 + i, 1, span(i)); if (span(i) > 1) r.merge(); r.setValue(h); });
+    sh.getRange(row, 2, 1, W).setFontWeight("bold").setFontColor(C.night).setFontSize(9.5)
+      .setBorder(null, null, true, null, null, null, tone[0], SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+    sh.getRange(row, 3, 1, W - 1).setHorizontalAlignment("center");
+    const top = row;
     const start = row + 1;
     const data = rows.map((r) => head.map((_, i) => (r[i] == null ? "" : r[i])));
-    sh.getRange(start, 2, data.length, w).setValues(data).setVerticalAlignment("top");
-    data.forEach((_, i) => { if (i % 2) sh.getRange(start + i, 2, 1, w).setBackground(C.band); });
-    sh.getRange(start, 2, data.length, 1).setFontWeight("bold");
+    if (w > 1) sh.getRange(start, 2, data.length, w - 1).setValues(data.map((r) => r.slice(0, w - 1)));
+    data.forEach((r, k) => {
+      const c = sh.getRange(start + k, 2 + w - 1, 1, span(w - 1)); if (span(w - 1) > 1) c.merge(); c.setValue(r[w - 1]);
+      const lineR = sh.getRange(start + k, 2, 1, W);
+      lineR.setBackground(k % 2 ? C.band : "#FFFFFF").setBorder(null, null, true, null, null, null, "#ECE9F5", SpreadsheetApp.BorderStyle.SOLID);
+      const longest = Math.max(...r.map((v) => String(v).length));
+      if (longest > 40) { lineR.setWrap(true); sh.setRowHeight(start + k, Math.min(70, 24 + Math.floor(longest / 70) * 14)); }
+    });
+    sh.getRange(start, 2, data.length, 1).setFontWeight("bold").setHorizontalAlignment("left");
+    sh.getRange(start, 3, data.length, W - 1).setHorizontalAlignment("center");
+    if (w > 2 && data.some((r) => String(r[w - 1]).length > 30)) sh.getRange(start, 2 + w - 1, data.length, span(w - 1)).setHorizontalAlignment("left");
     Object.keys(marks || {}).forEach((i) => {
       const m = marks[i];
-      sh.getRange(start + Number(i), 2, 1, w).setBackground(m === "good" ? C.greenSoft : C.redSoft).setFontColor(m === "good" ? C.green : C.red);
+      sh.getRange(start + Number(i), 2, 1, W).setBackground(m === "good" ? C.greenSoft : C.redSoft);
+      sh.getRange(start + Number(i), 2).setFontColor(m === "good" ? C.green : C.red).setValue((m === "good" ? "▲ " : "▼ ") + data[Number(i)][0]);
     });
-    const range = { start, end: start + data.length - 1, top: row };
+    const rules = sh.getConditionalFormatRules();
+    (opt.scale || []).forEach((ci) => {
+      const rg = sh.getRange(start, 2 + ci, data.length, 1);
+      const b2 = SpreadsheetApp.newConditionalFormatRule().setRanges([rg]);
+      if (opt.reverse) b2.setGradientMinpoint("#CDEFE0").setGradientMidpointWithValue("#FFF6DD", SpreadsheetApp.InterpolationType.PERCENTILE, "50").setGradientMaxpoint("#F9D4CB");
+      else b2.setGradientMinpoint("#F9D4CB").setGradientMidpointWithValue("#FFF6DD", SpreadsheetApp.InterpolationType.PERCENTILE, "50").setGradientMaxpoint("#CDEFE0");
+      rules.push(b2.build());
+    });
+    sh.setConditionalFormatRules(rules);
     row = start + data.length + 1;
-    return range;
+    const chartable = opt.chart && data.filter((r) => opt.chart.cols.some((ci) => typeof r[ci] === "number")).length >= 2;
+    if (chartable) {
+      const ch = opt.chart;
+      const height = ch.type === "pie" ? 260 : 230;
+      let bld = sh.newChart();
+      bld = ch.type === "line" ? bld.asLineChart() : ch.type === "bar" ? bld.asBarChart() : ch.type === "pie" ? bld.asPieChart() : bld.asColumnChart();
+      bld = bld.addRange(sh.getRange(top, 2, data.length + 1, 1));
+      ch.cols.forEach((ci) => { bld = bld.addRange(sh.getRange(top, 2 + ci, data.length + 1, 1)); });
+      bld = bld.setNumHeaders(1).setPosition(row, 2, 0, 0)
+        .setOption("title", ch.title || "").setOption("titleTextStyle", { color: C.night, fontSize: 12, bold: true })
+        .setOption("width", CHART_W).setOption("height", height)
+        .setOption("colors", ch.colors || [tone[0], C.gold, C.green, "#5AB0F0"])
+        .setOption("legend", { position: ch.cols.length > 1 || ch.type === "pie" ? "right" : "none" })
+        .setOption("backgroundColor", "#FFFFFF").setOption("chartArea", { width: "82%", height: "70%" })
+        .setOption("animation", { duration: 600, startup: true });
+      if (ch.type !== "pie") bld = bld.setOption("vAxis", ch.max ? { viewWindow: { min: 0, max: ch.max }, gridlines: { color: "#EEEAF7" } } : { minValue: 0, gridlines: { color: "#EEEAF7" } });
+      if (ch.type === "pie") bld = bld.setOption("pieHole", 0.45);
+      sh.insertChart(bld.build());
+      row += Math.ceil(height / 24) + 1;
+    }
+    return { start, end: start + data.length - 1, top };
   };
-  const needs = (title, have, need, what) => block(title, `Needs ${need - have} more ${what} before this means anything (${have}/${need}). Keep logging, it fills in by itself.`, [], []);
+  const needs = (title, have, need, what) => block(title, `Needs ${need - have} more ${what} before this means anything (${have}/${need}). It fills in by itself as you log.`, [], []);
 
-  if (!days.length) { block("Nothing to show yet", "Log a few days in the app and this tab fills itself.", [], []); return; }
+  if (!days.length) { section("📭", "Nothing to show for this period", "violet"); block("Log a few days in the app and this tab fills itself.", "", [], []); return; }
 
   const scores = days.map((d) => d.score);
   const byKey = {};
@@ -1277,15 +1403,21 @@ function buildInsights() {
   days.forEach((d) => { run = d.score >= 70 ? (prev && shiftKey(prev, 1) === d.key ? run + 1 : 1) : 0; prev = d.score >= 70 ? d.key : null; best = Math.max(best, run); });
   const top = days.reduce((a, b) => (b.score > a.score ? b : a));
   const low = days.reduce((a, b) => (b.score < a.score ? b : a));
-  block("Overview", "", ["", "Value", "", "", "", "", ""], [
-    ["Days logged", days.length],
-    ["Average score", r1(avgOf(scores))],
-    ["Last 7 days", r1(avgOf(within(7).map((d) => d.score)))],
-    ["Last 30 days", r1(avgOf(within(30).map((d) => d.score)))],
-    ["Best day", `${r1(top.score)} · ${Utilities.formatDate(top.d, ctx.tz, "EEE d MMM")}`],
-    ["Hardest day", `${r1(low.score)} · ${Utilities.formatDate(low.d, ctx.tz, "EEE d MMM")}`],
-    ["Streak at 70+ (now / best)", `${cur} / ${best} days`],
+  const last7 = avgOf(within(7).map((d) => d.score)), prev7 = avgOf(days.filter((d) => d.key > shiftKey(today, -14) && d.key <= shiftKey(today, -7)).map((d) => d.score));
+  const kAll = days.filter((d) => typeof d.khushu === "number");
+  const sl = days.filter((d) => d.sleepH != null);
+  const delta = last7 != null && prev7 != null ? `${last7 >= prev7 ? "▲" : "▼"} ${r1(Math.abs(last7 - prev7))} vs the week before` : "this week";
+  tiles([
+    ["Average score", r1(avgOf(scores)), `${days.length} days`, "violet"],
+    ["Last 7 days", r1(last7), delta, last7 != null && prev7 != null && last7 < prev7 ? "red" : "green"],
+    ["Best day", r1(top.score), Utilities.formatDate(top.d, ctx.tz, "EEE d MMM"), "green"],
+    ["Hardest day", r1(low.score), Utilities.formatDate(low.d, ctx.tz, "EEE d MMM"), "red"],
+    ["Streak 70+", `${cur} d`, `best ${best} days`, "gold"],
+    ["Khushūʿ", kAll.length ? r0(avgOf(kAll.map((d) => d.khushu))) + "%" : "–", kAll.length ? `${kAll.length} days logged` : "log it after prayers", "violet"],
+    ["Sleep", sl.length ? r1(avgOf(sl.map((d) => d.sleepH))) + " h" : "–", sl.length ? "average a night" : "from the check-in", "gold"],
+    ["Pages memorised", days.reduce((n, d) => n + (d.pages || 0), 0), "in this period", "green"],
   ]);
+  section("📅", "Your days", "violet");
 
   /* ---- Weekdays ---- */
   const wd = [1, 2, 3, 4, 5, 6, 0].map((w) => {
@@ -1303,14 +1435,8 @@ function buildInsights() {
       wdNote = `Your best day is ${WEEKDAYS[hi.w]} (${r1(hi.avg)}), your hardest is ${WEEKDAYS[lo.w]} (${r1(lo.avg)}).`;
     }
   }
-  const wdRange = block("By day of the week", wdNote, ["Day", "Days", "Avg score", "Salah /40", "Qur'an /30", "Productive /20", "Walk /10"], wd.map((x) => x.row), wdMarks);
-  if (wdRange) {
-    sh.insertChart(sh.newChart().asColumnChart()
-      .addRange(sh.getRange(wdRange.top, 2, 8, 1)).addRange(sh.getRange(wdRange.top, 4, 8, 1)).setNumHeaders(1)
-      .setPosition(wdRange.top, 10, 0, 0).setOption("title", "Average score by weekday").setOption("legend", { position: "none" })
-      .setOption("colors", [C.violet]).setOption("vAxis", { viewWindow: { min: 0, max: 100 } })
-      .setOption("width", 420).setOption("height", 240).build());
-  }
+  block("By day of the week", wdNote, ["Day", "Days", "Avg score", "Salah /40", "Qur'an /30", "Productive /20", "Health /10"], wd.map((x) => x.row), wdMarks,
+    { scale: [2], chart: { type: "column", cols: [2], title: "Average score by weekday", max: 100 } });
 
   /* ---- Best & worst days ---- */
   const line = (d) => [Utilities.formatDate(d.d, ctx.tz, "EEE d MMM yyyy"), r1(d.score), d.dayType || "", String(d.summary || "").slice(0, 160)];
@@ -1319,6 +1445,7 @@ function buildInsights() {
   block("Your 5 hardest days", "", ["Date", "Score", "Day type", "The day in a line"], sorted.slice(-5).reverse().map(line));
 
   /* ---- Rebound ---- */
+  section("🔁", "Bad days: how you respond, and what comes with them", "red");
   const nextOf = (pred) => days.filter(pred).map((d) => ({ d, n: byKey[shiftKey(d.key, 1)] })).filter((x) => x.n);
   const reb = (label, list) => {
     const better = list.filter((x) => x.n.score > x.d.score + 5).length, worse = list.filter((x) => x.n.score < x.d.score - 5).length;
@@ -1379,25 +1506,21 @@ function buildInsights() {
     const sleepRows = bucketRows([
       ["Under 6 h", (d) => d.sleepH != null && d.sleepH < 6], ["6–7 h", (d) => d.sleepH >= 6 && d.sleepH < 7],
       ["7–8 h", (d) => d.sleepH >= 7 && d.sleepH < 8], ["8 h or more", (d) => d.sleepH >= 8]]);
-    const sleepRange = block("Score by hours of sleep", "", ["Sleep", "Days", "Avg score", "Salah", "Qur'an"], sleepRows, hiLo(sleepRows));
-    if (sleepRange) {
-      sh.insertChart(sh.newChart().asColumnChart()
-        .addRange(sh.getRange(sleepRange.top, 2, 5, 1)).addRange(sh.getRange(sleepRange.top, 4, 5, 1)).setNumHeaders(1)
-        .setPosition(sleepRange.top, 10, 0, 0).setOption("title", "Score by sleep").setOption("legend", { position: "none" })
-        .setOption("colors", [C.green]).setOption("vAxis", { viewWindow: { min: 0, max: 100 } })
-        .setOption("width", 420).setOption("height", 220).build());
-    }
+    section("😴", "Sleep, phone, energy, mood", "gold");
+    block("Score by hours of sleep", "", ["Sleep", "Days", "Avg score", "Salah", "Qur'an"], sleepRows, hiLo(sleepRows),
+      { scale: [2], chart: { type: "column", cols: [2], title: "Average score by hours of sleep", max: 100 } });
     const bedRows = bucketRows([
       ["Before 23:00", (d) => d.bed != null && d.bed >= 12 * 60 && d.bed < 23 * 60], ["23:00–00:00", (d) => d.bed >= 23 * 60],
       ["00:00–01:00", (d) => d.bed != null && d.bed < 60], ["After 01:00", (d) => d.bed != null && d.bed >= 60 && d.bed < 12 * 60]]);
-    block("Score by bedtime (the night before)", "", ["Went to sleep", "Days", "Avg score", "Salah", "Qur'an"], bedRows, hiLo(bedRows));
+    block("Score by bedtime (the night before)", "", ["Went to sleep", "Days", "Avg score", "Salah", "Qur'an"], bedRows, hiLo(bedRows),
+      { scale: [2], chart: { type: "column", cols: [2], title: "Average score by bedtime", max: 100 } });
     const phoneRows = bucketRows([["None", (d) => d.phone === "None"], ["A bit", (d) => d.phone === "A bit"], ["A lot", (d) => d.phone === "A lot"]]);
     const nextPhone = (v) => r1(avgOf(ck.filter((d) => d.phone === v).map((d) => byKey[shiftKey(d.key, 1)]).filter(Boolean).map((n) => n.score)));
     block("Score by phone & scrolling", `The day after scrolling a lot you average ${nextPhone("A lot")}; after no scrolling, ${nextPhone("None")}.`,
-      ["Phone", "Days", "Avg score", "Salah", "Qur'an"], phoneRows, hiLo(phoneRows));
+      ["Phone", "Days", "Avg score", "Salah", "Qur'an"], phoneRows, hiLo(phoneRows), { scale: [2], chart: { type: "column", cols: [2], title: "Average score by phone use", max: 100 } });
     const scale = (key2, label) => {
       const rows2 = bucketRows([1, 2, 3, 4, 5].map((n) => [`${label} ${n}/5`, (d) => d[key2] === n]));
-      return block(`Score by ${label.toLowerCase()}`, "", [label, "Days", "Avg score", "Salah", "Qur'an"], rows2, hiLo(rows2));
+      return block(`Score by ${label.toLowerCase()}`, "", [label, "Days", "Avg score", "Salah", "Qur'an"], rows2, hiLo(rows2), { scale: [2] });
     };
     scale("energy", "Energy");
     scale("mood", "Mood");
@@ -1421,6 +1544,7 @@ function buildInsights() {
   }
 
   /* ---- Salah ---- */
+  section("🕌", "Salah & khushūʿ", "green");
   const salahRows = PR.map((p) => {
     const xs = days.filter((d) => d[p]);
     const exc = xs.filter((d) => d[p] === "Excused").length, base = xs.length - exc;
@@ -1452,7 +1576,7 @@ function buildInsights() {
     ["Reason", "Times", "Most often at", "Excuse?"], rKeys.map((r) => {
       const at = reasonCount[r].at, top2 = Object.keys(at).sort((a, b) => at[b] - at[a])[0];
       return [r, reasonCount[r].n, `${top2} (${at[top2]}×)`, ["Travelling", "Ill", "Ill / stomach ache", "Menstruation", "Rain / danger"].indexOf(r) >= 0 ? "Yes" : r === "Call of nature" ? "Partly" : "No"];
-    }));
+    }), {}, { chart: { type: "pie", cols: [1], title: "Reasons, all prayers", colors: [C.red, C.gold, C.violet, C.green, "#5AB0F0", "#B07CC6", "#8A86A6", "#E58E73", "#4BB3A8", "#C9A227"] } });
 
   /* ---- Khushūʿ ---- */
   const kd = days.filter((d) => typeof d.khushu === "number");
@@ -1460,12 +1584,15 @@ function buildInsights() {
   else {
     const per = PR.map((p) => {
       const hits = kd.map((d) => new RegExp(PRNAME[p] + ": (present|on and off|mostly elsewhere)").exec(String(d.khushuNote || ""))).filter(Boolean).map((m) => ({ "present": 2, "on and off": 1, "mostly elsewhere": 0 })[m[1]]);
-      return [PRNAME[p], hits.length, hits.length ? Math.round((hits.reduce((a, b) => a + b, 0) / (hits.length * 2)) * 100) + "%" : "–", pc(hits.filter((x) => x === 2).length, hits.length)];
+      return [PRNAME[p], hits.length, hits.length ? Math.round((hits.reduce((a, b) => a + b, 0) / (hits.length * 2)) * 100) : "–", pc(hits.filter((x) => x === 2).length, hits.length)];
     });
-    block("Khushūʿ by prayer", `Average focus over ${kd.length} days: ${r0(avgOf(kd.map((d) => d.khushu)))}%.`, ["Prayer", "Logged", "Focus", "Fully present"], per);
+    block("Khushūʿ by prayer", `Average focus over ${kd.length} days: ${r0(avgOf(kd.map((d) => d.khushu)))}% (100 = fully present every time).`, ["Prayer", "Logged", "Focus /100", "Fully present"], per, {},
+      { scale: [2], chart: { type: "column", cols: [2], title: "Khushūʿ by prayer (focus /100)", max: 100 } });
     const count = (list) => { const c = {}; kd.forEach((d) => list.forEach((w) => { if (String(d.khushuNote || "").indexOf(w) >= 0) c[w] = (c[w] || 0) + 1; })); return Object.keys(c).sort((a, b) => c[b] - c[a]).map((w) => [w, c[w]]); };
-    block("What takes your mind away", "", ["Thought", "Times"], count(["Work / business", "Family", "Phone / social media", "Worries", "Future plans", "Food", "Studies", "A conversation", "Nothing specific"]));
-    block("Why focus slipped", "", ["Cause", "Times"], count(["Tired", "Rushed", "Noise / people", "Hungry", "Came in late", "Didn't prepare", "Phone just before", "Long day"]));
+    block("What takes your mind away", "", ["Thought", "Times"], count(["Work / business", "Family", "Phone / social media", "Worries", "Future plans", "Food", "Studies", "A conversation", "Nothing specific"]), {},
+      { chart: { type: "bar", cols: [1], title: "Thoughts during prayer", colors: [C.violet] } });
+    block("Why focus slipped", "", ["Cause", "Times"], count(["Tired", "Rushed", "Noise / people", "Hungry", "Came in late", "Didn't prepare", "Phone just before", "Long day"]), {},
+      { chart: { type: "bar", cols: [1], title: "Causes", colors: [C.gold] } });
     const ksleep = (f) => r0(avgOf(kd.filter(f).map((d) => d.khushu)));
     block("Khushūʿ and your day", "", ["", "Avg focus"], [
       ["After 7 h+ of sleep", ksleep((d) => d.sleepH >= 7) + "%"], ["After under 6 h", ksleep((d) => d.sleepH != null && d.sleepH < 6) + "%"],
@@ -1474,6 +1601,7 @@ function buildInsights() {
   }
 
   /* ---- Qur'an ---- */
+  section("📖", "Qurʾān", "gold");
   const lastP = days.slice().reverse().find((d) => d.portion);
   const memorised = lastP ? (Number(String(lastP.portion).split(/[–-]/)[0]) - 1 || 0) + (lastP.pages || 0) : 0;
   const pace28 = within(28).reduce((n, d) => n + (d.pages || 0), 0) / 28;
@@ -1499,25 +1627,39 @@ function buildInsights() {
     const a = avgOf(timed.slice(0, half).map((d) => d.minutes / d.pages)), b = avgOf(timed.slice(half).map((d) => d.minutes / d.pages));
     qRows.splice(5, 0, ["Getting faster?", b < a ? `Yes: ${r0(a)} → ${r0(b)} min per page` : `Not yet: ${r0(a)} → ${r0(b)} min per page`]);
   }
-  block("Qur'an & ḥifẓ", "", ["", "Value"], qRows);
+  block("Ḥifẓ at a glance", "", ["", "Value"], qRows);
+  const mus = (v) => timed.filter((d) => d.music === v);
+  const musRows = [["No music", mus("None")], ["A little", mus("A little")], ["Music", mus("Yes")]].map(([l, xs]) => [l, xs.length, xs.length ? Number(r1(avgOf(xs.map((d) => d.minutes / d.pages)))) : "–"]);
+  const musN = musRows.filter((r) => r[1] > 0).length;
+  block("Minutes per page, by music the day before", musN < 2
+    ? "Answer the music question after memorising (it pops up in the app). Once there are timed days with and without music, they're compared here."
+    : (() => { const a = musRows[0][2], b = [musRows[1], musRows[2]].filter((r) => typeof r[2] === "number"); const m = b.length ? avgOf(b.map((r) => r[2])) : null; return typeof a === "number" && m != null ? `Without music the day before: ${a} min a page; after music: ${r1(m)}. ${a < m ? "Less music, faster ḥifẓ." : "No clear gain yet: keep logging."}` : ""; })(),
+    ["Day before", "Timed days", "Min / page"], musN ? musRows : [], {}, { scale: [2], reverse: true, chart: { type: "column", cols: [2], title: "Minutes per page by music the day before", colors: [C.green] } });
   const weeks = [];
   for (let i = 7; i >= 0; i--) {
     const end = shiftKey(today, -7 * i), startK = shiftKey(end, -6);
     const xs = days.filter((d) => d.key >= startK && d.key <= end);
     weeks.push([`Week of ${Utilities.formatDate(new Date(startK + "T12:00:00"), ctx.tz, "d MMM")}`, xs.reduce((n, d) => n + (d.pages || 0), 0), xs.reduce((n, d) => n + (d.revised || 0), 0), r1(xs.reduce((n, d) => n + (d.hours || 0), 0)), r0(avgOf(xs.map((d) => d.steps).filter((v) => v != null))), r1(avgOf(xs.map((d) => d.score)))]);
   }
-  block("Week by week (last 8 weeks)", "", ["Week", "Pages", "Revised", "Productive hours", "Avg steps", "Avg score"], weeks);
+  block("Week by week (last 8 weeks)", "", ["Week", "Pages", "Revised", "Productive h", "Avg steps", "Avg score"], weeks, {},
+    { scale: [5], chart: { type: "column", cols: [1, 2], title: "Pages memorised and revised, per week", colors: [C.gold, C.violet] } });
 
   /* ---- Work & walk ---- */
+  section("⚡", "Productivity & health", "green");
   const topicH = {};
   days.forEach((d) => { const ts = String(d.topics || "").split(",").map((t) => t.trim()).filter(Boolean); ts.forEach((t) => (topicH[t] = (topicH[t] || 0) + (d.hours || 0) / ts.length)); });
   const tk = Object.keys(topicH).sort((a, b) => topicH[b] - topicH[a]);
   const deep = days.filter((d) => d.hours >= 2), little = days.filter((d) => (d.hours || 0) < 1);
   block("Productivity", `Days with 2 h+ of productive time average ${r1(avgOf(deep.map((d) => d.score)))}; days under 1 h average ${r1(avgOf(little.map((d) => d.score)))}.`,
-    ["Topic", "Hours (approx.)", "Share"], tk.map((t) => [t, r1(topicH[t]), pc(topicH[t], tk.reduce((n, x) => n + topicH[x], 0))]));
+    ["Topic", "Hours (approx.)", "Share"], tk.map((t) => [t, r1(topicH[t]), pc(topicH[t], tk.reduce((n, x) => n + topicH[x], 0))]), {},
+    { chart: { type: "pie", cols: [1], title: "Where your productive hours go" } });
   const walked = days.filter((d) => d.steps != null);
   const goal = walked.filter((d) => d.steps >= 8000);
-  block("Walking", "", ["", "Value"], [
+  const wk = days.filter((d) => String(d.workout || "").indexOf("✓") === 0);
+  const wkOn = days.filter((d) => Number(d.rules) >= 2);
+  block("Walking & workout", "", ["", "Value"], [
+    ["Workouts", wkOn.length ? `${wk.length} of ${wkOn.length} days (${pc(wk.length, wkOn.length)})` : "–"],
+    ["Avg score on workout days / others", wk.length ? `${r1(avgOf(wk.map((d) => d.score)))} / ${r1(avgOf(wkOn.filter((d) => wk.indexOf(d) < 0).map((d) => d.score)))}` : "–"],
     ["Average steps", r0(avgOf(walked.map((d) => d.steps)))],
     ["Days at 8,000+", `${goal.length} (${pc(goal.length, walked.length)})`],
     ["Avg score on 8k days / other days", `${r1(avgOf(goal.map((d) => d.score)))} / ${r1(avgOf(walked.filter((d) => d.steps < 8000).map((d) => d.score)))}`],
@@ -1527,26 +1669,32 @@ function buildInsights() {
   /* ---- Months ---- */
   const months = {};
   days.forEach((d) => { const m = d.key.slice(0, 7); (months[m] = months[m] || []).push(d); });
-  block("Month by month", "", ["Month", "Days", "Avg score", "Salah", "Qur'an", "Productive", "Walk"], Object.keys(months).sort().reverse().map((m) => {
+  section("📈", "Over time", "violet");
+  block("Month by month", "", ["Month", "Days", "Avg score", "Salah", "Qur'an", "Productive", "Health"], Object.keys(months).sort().map((m) => {
     const xs = months[m], a = (k2) => r1(avgOf(xs.map((d) => d[k2]).filter((v) => v != null)));
     return [Utilities.formatDate(new Date(m + "-15T12:00:00"), ctx.tz, "MMMM yyyy"), xs.length, a("score"), a("salah"), a("quran"), a("work"), a("walk")];
-  }));
+  }), {}, { scale: [2], chart: { type: "line", cols: [2, 3, 4], title: "Score, salah and Qurʾān by month", colors: [C.night, C.violet, C.gold] } });
 
   /* ---- Day types & bonus ---- */
   block("How your days felt (journal)", "", ["Day type", "Days", "Avg score", "Avg sleep (h)", "Phone a lot"], Object.keys(VERDICT).map((v) => {
     const xs = days.filter((d) => d.dayType === VERDICT[v].label);
     return [VERDICT[v].label, xs.length, r1(avgOf(xs.map((d) => d.score))), r1(avgOf(xs.map((d) => d.sleepH).filter((x) => x != null))), pc(xs.filter((d) => d.phone === "A lot").length, xs.filter((d) => d.phone).length)];
-  }));
+  }), {}, { chart: { type: "pie", cols: [1], title: "Good / hard-but-good / hard days", colors: [C.green, C.gold, C.red] } });
+  section("✦", "Voluntary deeds & dhikr", "gold");
   const has = (w) => days.filter((d) => String(d.bonusList || "").indexOf(w) >= 0).length;
   block("Voluntary deeds ✦", "", ["", "Days"], [
     ["Tahajjud", has("Tahajjud")], ["Witr", has("Witr")], ["Ḍuḥā", has("Ḍuḥā")], ["Voluntary fasts", has("Voluntary fast")],
     ["Morning / evening adhkār", `${has("Morning adhkār")} / ${has("Evening adhkār")}`], ["All 12 rawātib", has("Rawātib 12/12")],
+    ["Sūrat al-Kahf (Fridays)", `${has("Sūrat al-Kahf")} of ${days.filter((d) => d.d.getDay() === 5).length} Fridays`],
+    ["Ṣalawāt on the Prophet ﷺ (Fridays)", days.reduce((n, d) => n + (d.salawat || 0), 0).toLocaleString()],
+    ["Subḥān Allāhi l-ʿAẓīm… (other days)", days.reduce((n, d) => n + (d.tasbih || 0), 0).toLocaleString()],
     ["Average bonus per day", r1(avgOf(days.map((d) => d.bonus || 0)))],
   ]);
 
   /* ---- Weekly letters ---- */
+  section("✉️", "Weekly letters", "violet");
   const letters = JSON.parse(PropertiesService.getScriptProperties().getProperty("LETTERS") || "[]");
-  block("Weekly letters", letters.length ? "Written every Sunday evening from your week." : "Your first letter arrives on Sunday evening. Or: Muhasaba menu → Write this week's letter now.",
+  block("Your letters", letters.length ? "Written every Sunday evening from your week." : "Your first letter arrives on Sunday evening. Or: Muhasaba menu → Write this week's letter now.",
     ["Week", "Letter"], letters.map((l) => [l.week, `=HYPERLINK("${l.url}","${String(l.title || "Open").replace(/"/g, "'")} ↗")`]));
 }
 

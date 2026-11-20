@@ -16,6 +16,8 @@ export interface QuranLog {
   revJuz?: number;
   mulkSubh: boolean;
   mulkMaghrib: boolean;
+  /** Music listened to the day before memorising: 0 none · 1 a little · 2 yes. */
+  music?: 0 | 1 | 2;
 }
 
 export interface WorkLog {
@@ -88,6 +90,8 @@ export interface DayLog {
   tathbit: Tathbit;
   workout: Workout;
   sc: SelfControl;
+  /** Dhikr counts: ṣalawāt on the Prophet ﷺ (Fridays) and the two tasbīḥ (other days). */
+  dhikr: { salawat: number; tasbih: number };
   why: Partial<Record<PrayerId, PrayerWhy>>;
   checkin: Checkin;
   rev: RevRange[];

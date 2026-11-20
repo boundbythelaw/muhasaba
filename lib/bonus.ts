@@ -15,6 +15,8 @@ export interface BonusLog {
   adhkarAm: boolean;
   adhkarPm: boolean;
   fast: boolean;
+  /** Friday only. */
+  kahf: boolean;
   rawatib: Record<RawatibId, boolean>;
 }
 
@@ -29,7 +31,8 @@ export const RAWATIB: { id: RawatibId; label: string; rakat: number }[] = [
   { id: "isha", label: "2 after Isha", rakat: 2 },
 ];
 
-export const BONUS_ITEMS: { id: Exclude<keyof BonusLog, "rawatib">; label: string; sub: string; pts: number; ar: string }[] = [
+export const BONUS_ITEMS: { id: Exclude<keyof BonusLog, "rawatib">; label: string; sub: string; pts: number; ar: string; friday?: boolean }[] = [
+  { id: "kahf", label: "Sūrat al-Kahf", sub: "Friday sunnah: a light between the two Fridays", pts: 5, ar: "سورة الكهف", friday: true },
   { id: "tahajjud", label: "Tahajjud", sub: "Night prayer before Subh", pts: 5, ar: "التهجد" },
   { id: "witr", label: "Witr", sub: "", pts: 5, ar: "الوتر" },
   { id: "duha", label: "Ḍuḥā", sub: "Forenoon prayer", pts: 5, ar: "الضحى" },
@@ -39,10 +42,10 @@ export const BONUS_ITEMS: { id: Exclude<keyof BonusLog, "rawatib">; label: strin
 ];
 
 export const RAWATIB_PTS = 5;
-export const BONUS_MAX = BONUS_ITEMS.reduce((n, b) => n + b.pts, 0) + RAWATIB_PTS + REV_PTS_MAX + 5;
+export const BONUS_MAX = BONUS_ITEMS.filter((b) => !b.friday).reduce((n, b) => n + b.pts, 0) + RAWATIB_PTS + REV_PTS_MAX + 5;
 
 export function blankBonus(): BonusLog {
-  return { tahajjud: false, witr: false, duha: false, adhkarAm: false, adhkarPm: false, fast: false,
+  return { tahajjud: false, witr: false, duha: false, adhkarAm: false, adhkarPm: false, fast: false, kahf: false,
     rawatib: { fajr: false, dhuhrBefore: false, dhuhrAfter: false, maghrib: false, isha: false } };
 }
 

@@ -18,6 +18,7 @@ import WorkCard from "./WorkCard";
 import CheckinCard, { CheckinNudge } from "./CheckinCard";
 import SelfControlCard from "./SelfControl";
 import WhatsNew from "./WhatsNew";
+import DhikrCard from "./DhikrCard";
 
 function ShukrCard() {
   const { day, update, locked, requestUnlock, cur } = useStore();
@@ -94,6 +95,7 @@ function Shell() {
               <WorkCard />
               <WalkCard />
               <BonusCard />
+              <DhikrCard />
               <CheckinCard />
               <SelfControlCard />
               <ShukrCard />

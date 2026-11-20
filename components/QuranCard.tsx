@@ -9,9 +9,10 @@ import { useStore } from "@/lib/store";
 import type { Difficulty, QuranLog } from "@/lib/types";
 import TimerBar from "./TimerBar";
 import { CardShell, CheckRow, Pill, Segmented, tap } from "./ui";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { murajaaPlan, rangeOf } from "@/lib/murajaa";
 import { AnimatedNumber, Disclose } from "./ui";
+import { BottomSheet } from "./Sheets";
 import { burst } from "@/lib/fx";
 
 export default function QuranCard() {
@@ -26,6 +27,15 @@ export default function QuranCard() {
   const curJuz = juzOf(po.from);
   const toggle = (f: keyof Pick<QuranLog, "preview" | "juz" | "mulkSubh" | "mulkMaghrib">) => (e: React.MouseEvent) =>
     update((d) => { d.quran[f] = !d.quran[f]; }, e);
+
+  // After the first pages of the day are logged: did you listen to music yesterday? (for the Insights)
+  const [musicAsk, setMusicAsk] = useState(false);
+  const prevMem = useRef(q.mem);
+  useEffect(() => {
+    if (prevMem.current === 0 && q.mem > 0 && q.music == null && cur === todayKey()) setTimeout(() => setMusicAsk(true), 700);
+    prevMem.current = q.mem;
+  }, [q.mem, q.music, cur]);
+  const setMusic = (v: 0 | 1 | 2) => update((d) => { d.quran.music = v; }, null, true, { noConfirm: true });
 
   return (
     <CardShell id="sec-q" title={tr("Qur'an")} ar="القرآن" value={scores.q} max={30} done={scores.q >= 30} summary={tr("Pages {a}–{b} memorised, juz read, Al-Mulk twice", { a: po.from, b: po.to })}>
@@ -100,6 +110,25 @@ export default function QuranCard() {
         <CheckRow on={q.mulkSubh} title={tr("Sūrat al-Mulk after Subh")} points={2.5} onToggle={toggle("mulkSubh")} />
         <CheckRow on={q.mulkMaghrib} title={tr("Sūrat al-Mulk after Maghrib")} points={2.5} onToggle={toggle("mulkMaghrib")} />
       </div>
+
+      {q.mem > 0 && (
+        <button className="musicrow" onClick={() => setMusicAsk(true)}>
+          🎧 {tr("Music the day before")}: <b>{q.music == null ? tr("not answered") : tr(["None", "A little", "Yes"][q.music])}</b>
+        </button>
+      )}
+      <BottomSheet open={musicAsk} onClose={() => setMusicAsk(false)} label={tr("Music")}>
+        <div className="sheet-body">
+          <h3>{tr("Did you listen to music yesterday?")}</h3>
+          <p className="sheet-msg">{tr("Your Insights will compare how long a page takes after days with and without music.")}</p>
+          <div className="musicopts">
+            {([[0, "🚫", "None"], [1, "🎵", "A little"], [2, "🎧", "Yes"]] as const).map(([v, ic, l]) => (
+              <motion.button key={v} {...tap} className={`focusopt ${q.music === v ? "on" : ""}`} onClick={() => { void setMusic(v).then(() => { haptic(10); setMusicAsk(false); if (v === 0) toast(tr("Al-ḥamdu lillāh. Keep guarding your heart for the Qur'an.")); }); }}>
+                <span>{ic}</span><b>{tr(l)}</b>
+              </motion.button>
+            ))}
+          </div>
+        </div>
+      </BottomSheet>
 
       <Disclose label={`${tr("Your Mushaf")} · ${po.done}/${MUSHAF_PAGES} · ${((po.done / MUSHAF_PAGES) * 100).toFixed(1)}%`}>
       <div className="juz">

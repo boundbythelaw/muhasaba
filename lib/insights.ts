@@ -60,6 +60,12 @@ export function computeInsights(days: Record<string, DayLog>) {
   const perPage = avg(hifz.map((r) => r.d.quran.minutes! / r.d.quran.mem));
   const byDiff = (["easy", "normal", "hard"] as const).map((df) => ({ diff: df, avg: avg(hifz.filter((r) => r.d.quran.diff === df).map((r) => r.d.quran.minutes! / r.d.quran.mem)) }));
 
+  const mp = (xs: typeof hifz) => avg(xs.map((r) => r.d.quran.minutes! / r.d.quran.mem));
+  const byMusic = [
+    { label: "No music", avg: mp(hifz.filter((r) => r.d.quran.music === 0)), n: hifz.filter((r) => r.d.quran.music === 0).length },
+    { label: "A little", avg: mp(hifz.filter((r) => r.d.quran.music === 1)), n: hifz.filter((r) => r.d.quran.music === 1).length },
+    { label: "Music", avg: mp(hifz.filter((r) => r.d.quran.music === 2)), n: hifz.filter((r) => r.d.quran.music === 2).length },
+  ];
   const ck = rows.filter((r) => checkinDone(r.d.checkin));
   const sleep = bucket(ck, [
     { label: "< 6 h", test: (r) => (sleepHours(r.d.checkin) ?? 0) < 6 },
@@ -91,5 +97,5 @@ export function computeInsights(days: Record<string, DayLog>) {
   };
 
   return { n: rows.length, avg: avg(rows.map((r) => r.s.total)), weekday, bestWd: ranked[0] ?? null, worstWd: ranked.length > 1 ? ranked[ranked.length - 1] : null,
-    best, worst, rebound, prayers, hardest, reasons, perPage, byDiff, checkins: ck.length, sleep, bedtime, phone, slip };
+    best, worst, rebound, prayers, hardest, reasons, perPage, byDiff, byMusic, checkins: ck.length, sleep, bedtime, phone, slip };
 }

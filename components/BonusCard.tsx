@@ -1,6 +1,7 @@
 "use client";
 import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
+import { isFriday } from "@/lib/constants";
 import { BONUS_ITEMS, BONUS_MAX, RAWATIB, RAWATIB_PTS, rakatDone, type BonusLog } from "@/lib/bonus";
 import { haptic } from "@/lib/fx";
 import { tr } from "@/lib/i18n";
@@ -10,12 +11,14 @@ import { AnimatedNumber, CheckRow, tap } from "./ui";
 
 /** Voluntary acts. Folded by default so the page stays calm; they only ever add points. */
 export default function BonusCard() {
-  const { day, scores, update } = useStore();
+  const { day, scores, update, cur } = useStore();
   const [open, setOpen] = useState(false);
   const [rOpen, setROpen] = useState(false);
   const b = day.bonus;
   const rakat = rakatDone(b);
-  const done = BONUS_ITEMS.filter((it) => b[it.id]);
+  const friday = isFriday(cur);
+  const items = BONUS_ITEMS.filter((it) => !it.friday || friday || b[it.id]);
+  const done = items.filter((it) => b[it.id]);
   const set = (fn: (x: BonusLog) => void) => (e: React.MouseEvent) => update((d) => fn(d.bonus), e);
 
   return (
@@ -63,8 +66,8 @@ export default function BonusCard() {
             </div>
 
             <div className="checks">
-              {BONUS_ITEMS.map((it) => (
-                <CheckRow key={it.id} on={b[it.id]} title={it.label} sub={it.sub ? tr(it.sub) : it.ar} points={it.pts}
+              {items.map((it) => (
+                <CheckRow key={it.id} on={b[it.id]} title={it.friday ? `🕌 ${tr(it.label)}` : it.label} sub={it.sub ? tr(it.sub) : it.ar} points={it.pts}
                   onToggle={set((x) => { x[it.id] = !x[it.id]; })} />
               ))}
             </div>
@@ -72,6 +75,9 @@ export default function BonusCard() {
           </motion.div>
         ) : (
           <motion.div key="sum" className="bonussum" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            {friday && !b.kahf && (
+              <button className="bchip kahfnudge" onClick={(e) => { e.stopPropagation(); setOpen(true); }}>🕌 {tr("Sūrat al-Kahf today?")} +5</button>
+            )}
             {done.length || rakat ? (
               <>
                 {done.map((it) => <span key={it.id} className="bchip">{tr(it.label)}</span>)}
