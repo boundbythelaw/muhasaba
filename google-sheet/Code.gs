@@ -177,6 +177,9 @@ function doPost(e) {
     if (body.ping) {
       return json({ ok: true, app: "muhasaba", sheet: SpreadsheetApp.getActive().getName(), days: lastDataRow(sheet) - 1, ai: aiProvider() || "none", schema: SCHEMA });
     }
+    if (body.future || body.futureCancel || body.futureList) {
+      return json(Object.assign({ ok: true }, futureApi(body)));
+    }
     if (body.repolish) {
       lock.releaseLock();
       const r = repolishAll(3);
@@ -309,12 +312,12 @@ function savedManaged() {
   const sh = SpreadsheetApp.getActive().getSheetByName(STORE);
   if (!sh || sh.getLastRow() < 2) return out;
   sh.getRange(2, 1, sh.getLastRow() - 1, SCOLS.length).getValues().forEach((r) => {
-    const date = String(r[S("date") - 1]), docId = r[S("docId") - 1];
+    const date = String(r[S("date") - 1]), docId = r[S("docId") - 1], tabId = r[S("tabId") - 1];
     if (!docId) return;
     const verdict = r[S("verdict") - 1], title = r[S("title") - 1], summary = r[S("summary") - 1];
     out[date] = {
       dayType: verdict && VERDICT[verdict] ? VERDICT[verdict].label : "",
-      journal: F(`=HYPERLINK("https://docs.google.com/document/d/${docId}/edit","Open ↗")`),
+      journal: F(`=HYPERLINK("${docUrl(docId, tabId)}","Open ↗")`),
       summary: title ? `${title}. ${summary}` : summary || "",
     };
   });
@@ -361,7 +364,9 @@ function setManaged(date, verdict, url, summary) {
 
 /* ================================================================== journal store */
 
-const SCOLS = ["date", "entries", "shukr", "meta", "hash", "processedHash", "docId", "changedAt", "verdict", "title", "summary", "error"];
+const SCOLS = ["date", "entries", "shukr", "meta", "hash", "processedHash", "docId", "changedAt", "verdict", "title", "summary", "error", "tabId"];
+/** Link to a day: its tab in the month Doc, or (older days) its own Doc. */
+const docUrl = (docId, tabId) => (docId ? `https://docs.google.com/document/d/${docId}/edit${tabId ? "?tab=" + tabId : ""}` : "");
 const S = (k) => SCOLS.indexOf(k) + 1;
 
 function storeSheet() {
@@ -372,6 +377,8 @@ function storeSheet() {
     sh.getRange(1, 1, 1, SCOLS.length).setValues([SCOLS]).setFontWeight("bold");
     sh.hideSheet();
   }
+  if (sh.getMaxColumns() < SCOLS.length) sh.insertColumnsAfter(sh.getMaxColumns(), SCOLS.length - sh.getMaxColumns());
+  if (sh.getRange(1, SCOLS.length).getValue() !== SCOLS[SCOLS.length - 1]) sh.getRange(1, 1, 1, SCOLS.length).setValues([SCOLS]).setFontWeight("bold");
   return sh;
 }
 
@@ -433,7 +440,7 @@ function docInfo(dates) {
     if (!r) return;
     const o = storeRead(sh, r);
     out[d] = {
-      url: o.docId ? `https://docs.google.com/document/d/${o.docId}/edit` : "",
+      url: docUrl(o.docId, o.tabId),
       verdict: o.verdict || "",
       title: o.title || "",
       summary: o.summary || "",
@@ -498,12 +505,15 @@ function processDay(date) {
   const shukrOut = (ai && ai.shukr) || shukr;
 
   MEDIA_ERRORS.length = 0;
-  const docId = writeDoc(o.docId, date, meta, entries, polished, shukr, shukrOut, verdict, title, summary, !!ai);
+  const out = writeDoc(o.docId, o.tabId, date, meta, entries, polished, shukr, shukrOut, verdict, title, summary, !!ai);
+  const docId = out.docId;
   const problems = [aiError && "AI polish failed: " + aiError.slice(0, 200)].concat(MEDIA_ERRORS.slice(0, 2)).filter(Boolean).join(" · ");
   if (!keepOld) sh.getRange(r, S("processedHash")).setValue(o.hash); // a failed AI call stays pending, so it retries
   sh.getRange(r, S("docId")).setValue(docId);
+  sh.getRange(r, S("tabId")).setValue(out.tabId || "");
   sh.getRange(r, S("verdict"), 1, 4).setValues([[verdict, title, summary, problems]]);
-  setManaged(date, verdict, `https://docs.google.com/document/d/${docId}/edit`, title ? `${title}. ${summary}` : summary);
+  setManaged(date, verdict, docUrl(docId, out.tabId), title ? `${title}. ${summary}` : summary);
+  if (out.tabId) { try { refreshCover(date.slice(0, 7)); } catch (err) { console.warn("Cover", err); } }
   if (problems) console.warn(date, problems);
   return docId;
 }
@@ -654,9 +664,29 @@ function journalFolder() {
   return f;
 }
 
-function writeDoc(docId, date, meta, original, polished, shukrRaw, shukrOut, verdict, title, summary, usedAI) {
+/**
+ * Writes one day. With the Google Docs API service on, every day is a tab in that month's Doc
+ * ("Muhasaba · November 2026"), so Drive holds one Doc per month instead of one per day.
+ * Without it (or if that fails), the day gets its own Doc as before.
+ */
+function writeDoc(docId, tabId, date, meta, original, polished, shukrRaw, shukrOut, verdict, title, summary, usedAI) {
+  if (hasDocsApi()) {
+    try {
+      const t = dayTab(date, verdict, title);
+      const doc = DocumentApp.openById(t.docId);
+      const tab = doc.getTab(t.tabId);
+      fillDay(tab.asDocumentTab().getBody(), date, meta, original, polished, shukrRaw, shukrOut, verdict, title, summary, usedAI);
+      doc.saveAndClose();
+      // The day used to have its own Doc: it now lives in the month Doc, so the old one goes to the bin.
+      if (docId && docId !== t.docId && !tabId) trashOld(docId);
+      return { docId: t.docId, tabId: t.tabId };
+    } catch (err) {
+      console.error("Month Doc failed, writing a single Doc", err);
+      MEDIA_ERRORS.push("Couldn't write in the month Doc: " + String(err && err.message || err).slice(0, 160));
+    }
+  }
   let doc = null;
-  if (docId) { try { doc = DocumentApp.openById(docId); } catch (e) { doc = null; } }
+  if (docId && !tabId) { try { doc = DocumentApp.openById(docId); } catch (e) { doc = null; } }
   const name = `Muhasaba · ${date} · ${meta.longDate || ""}`.trim();
   if (!doc) {
     doc = DocumentApp.create(name);
@@ -666,8 +696,15 @@ function writeDoc(docId, date, meta, original, polished, shukrRaw, shukrOut, ver
     doc.setName(name);
   }
   const body = doc.getBody();
+  try { body.setMarginTop(48).setMarginBottom(48).setMarginLeft(56).setMarginRight(56); } catch (e) { /* margins are per Doc */ }
+  fillDay(body, date, meta, original, polished, shukrRaw, shukrOut, verdict, title, summary, usedAI);
+  doc.saveAndClose();
+  return { docId: doc.getId(), tabId: "" };
+}
+
+/** The day's page: title, rating, timeline with photos, shukr, and the original notes. */
+function fillDay(body, date, meta, original, polished, shukrRaw, shukrOut, verdict, title, summary, usedAI) {
   body.clear();
-  body.setMarginTop(48).setMarginBottom(48).setMarginLeft(56).setMarginRight(56);
   const base = {};
   base[DocumentApp.Attribute.FONT_FAMILY] = "Lora";
   base[DocumentApp.Attribute.FONT_SIZE] = 11.5;
@@ -734,8 +771,256 @@ function writeDoc(docId, date, meta, original, polished, shukrRaw, shukrOut, ver
     if (String(shukrRaw || "").trim()) body.appendParagraph(`Shukr  ${shukrRaw}`)
       .setAttributes(Object.assign({}, base, { [DocumentApp.Attribute.FONT_SIZE]: 9, [DocumentApp.Attribute.FOREGROUND_COLOR]: "#8A86A6", [DocumentApp.Attribute.FONT_FAMILY]: "Roboto" }));
   }
+}
+
+/* ------------------------------------------------------------------ one Doc per month, a tab per day */
+
+/** True once the "Google Docs API" service is added in the Apps Script editor (Services ＋ on the left). */
+function hasDocsApi() {
+  try { return typeof Docs !== "undefined" && !!Docs.Documents; } catch (e) { return false; }
+}
+function docsBatch(id, requests) { return Docs.Documents.batchUpdate({ requests: requests }, id); }
+
+const MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const MONTHS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+const WD_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WD_FR = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+const WDL_FR = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+function keyParts(k) {
+  const [y, m, d] = String(k).split("-").map(Number);
+  return { y: y, m: m, d: d, wd: new Date(Date.UTC(y, m - 1, d)).getUTCDay() };
+}
+function monthLabel(ym, fr) {
+  const [y, m] = ym.split("-").map(Number);
+  const n = (fr ? MONTHS_FR : MONTHS_EN)[m - 1];
+  return `${n.charAt(0).toUpperCase() + n.slice(1)} ${y}`;
+}
+function dayLabel(k, fr) { const p = keyParts(k); return `${(fr ? WD_FR : WD_EN)[p.wd]} ${p.d}`; }
+/** "Saturday 21 November 2026" / "samedi 21 novembre 2026" */
+function longKey(k, fr) {
+  const p = keyParts(k);
+  return fr ? `${WDL_FR[p.wd]} ${p.d} ${MONTHS_FR[p.m - 1]} ${p.y}` : `${WEEKDAYS[p.wd]} ${p.d} ${MONTHS_EN[p.m - 1]} ${p.y}`;
+}
+function tabTitle(date, verdict, title) {
+  const v = verdict && VERDICT[verdict] ? VERDICT[verdict].dot + " " : "";
+  const t = `${v}${dayLabel(date, appCtx().fr)}${title ? " · " + title : ""}`;
+  return t.length > 60 ? t.slice(0, 59) + "…" : t;
+}
+
+function monthReg(ym) {
+  try { return JSON.parse(PropertiesService.getScriptProperties().getProperty("JM_" + ym) || "null"); } catch (e) { return null; }
+}
+function saveMonthReg(ym, reg) { PropertiesService.getScriptProperties().setProperty("JM_" + ym, JSON.stringify(reg)); }
+function trashOld(id) { try { DriveApp.getFileById(id).setTrashed(true); } catch (e) { /* already gone */ } }
+
+/** The month's Doc, made the first time it's needed. Its first tab is a contents page for the month. */
+function monthDoc(ym) {
+  let reg = monthReg(ym);
+  if (reg) { try { if (DriveApp.getFileById(reg.doc).isTrashed()) reg = null; } catch (e) { reg = null; } }
+  if (reg) return reg;
+  const label = monthLabel(ym, appCtx().fr);
+  const doc = DocumentApp.create(`Muhasaba · ${label}`);
+  try { doc.getBody().setMarginTop(48).setMarginBottom(48).setMarginLeft(56).setMarginRight(56); } catch (e) { /* ok */ }
+  const cover = doc.getTabs()[0].getId();
   doc.saveAndClose();
-  return doc.getId();
+  DriveApp.getFileById(doc.getId()).moveTo(journalFolder());
+  reg = { doc: doc.getId(), cover: cover, tabs: {} };
+  saveMonthReg(ym, reg);
+  docsBatch(reg.doc, [{ updateDocumentTabProperties: { tabProperties: { tabId: cover, title: "📅 " + label }, fields: "title" } }]);
+  return reg;
+}
+
+/** The day's tab in its month Doc (made if needed, kept in date order), renamed to show the rating and title. */
+function dayTab(date, verdict, title) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const ym = date.slice(0, 7);
+    const reg = monthDoc(ym);
+    const name = tabTitle(date, verdict, title);
+    let tabId = reg.tabs[date];
+    if (tabId) {
+      try { docsBatch(reg.doc, [{ updateDocumentTabProperties: { tabProperties: { tabId: tabId, title: name }, fields: "title" } }]); }
+      catch (e) { delete reg.tabs[date]; tabId = null; } // the tab was deleted by hand: make it again
+    }
+    if (!tabId) {
+      const index = 1 + Object.keys(reg.tabs).filter((d) => d < date).length;
+      let r;
+      try { r = docsBatch(reg.doc, [{ addDocumentTab: { tabProperties: { title: name, index: index } } }]); }
+      catch (e) { r = docsBatch(reg.doc, [{ addDocumentTab: { tabProperties: { title: name } } }]); }
+      tabId = r.replies[0].addDocumentTab.tabProperties.tabId;
+      reg.tabs[date] = tabId;
+      saveMonthReg(ym, reg);
+    }
+    return { docId: reg.doc, tabId: tabId, ym: ym };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** The month's first tab: every day with its rating, title and summary, each one a link to its tab. */
+function refreshCover(ym) {
+  const reg = monthReg(ym);
+  if (!reg) return;
+  const fr = appCtx().fr;
+  const sh = storeSheet();
+  const info = {};
+  if (sh.getLastRow() >= 2) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, SCOLS.length).getValues().forEach((r) => {
+      const d = String(r[0]);
+      if (!reg.tabs[d]) return;
+      let meta = {};
+      try { meta = JSON.parse(r[S("meta") - 1] || "{}"); } catch (e) { /* ignore */ }
+      info[d] = { verdict: r[S("verdict") - 1], title: r[S("title") - 1], summary: r[S("summary") - 1], meta: meta };
+    });
+  }
+  const doc = DocumentApp.openById(reg.doc);
+  const tab = doc.getTab(reg.cover);
+  if (!tab) { doc.saveAndClose(); return; }
+  const body = tab.asDocumentTab().getBody();
+  body.clear();
+  const A = DocumentApp.Attribute;
+  const st = (o) => { const x = {}; Object.keys(o).forEach((k) => (x[A[k]] = o[k])); return x; };
+  const dates = Object.keys(reg.tabs).sort();
+  const first = body.getParagraphs()[0];
+  first.setText(monthLabel(ym, fr)).setHeading(DocumentApp.ParagraphHeading.TITLE);
+  first.setAttributes(st({ FONT_FAMILY: "Poppins", FONT_SIZE: 28, BOLD: true, FOREGROUND_COLOR: C.night }));
+  const counts = { good: 0, hard_good: 0, hard: 0 };
+  const scores = [];
+  dates.forEach((d) => {
+    const i = info[d] || {};
+    if (counts[i.verdict] != null) counts[i.verdict]++;
+    if (i.meta && i.meta.score !== "" && i.meta.score != null && !isNaN(Number(i.meta.score))) scores.push(Number(i.meta.score));
+  });
+  const sub = [fr ? `${dates.length} jour${dates.length > 1 ? "s" : ""} écrit${dates.length > 1 ? "s" : ""}` : `${dates.length} day${dates.length > 1 ? "s" : ""} written`]
+    .concat(Object.keys(counts).filter((k) => counts[k]).map((k) => `${VERDICT[k].dot} ${counts[k]}`))
+    .concat(scores.length ? [`${fr ? "score moyen" : "average score"} ${Math.round(avgOf(scores))}/100`] : []).join("   ·   ");
+  body.appendParagraph(sub).setAttributes(st({ FONT_FAMILY: "Roboto", FONT_SIZE: 10.5, BOLD: false, FOREGROUND_COLOR: "#6A6688" }));
+  body.appendParagraph(fr ? "Chaque jour a son onglet à gauche. Touche un jour ci-dessous pour l'ouvrir." : "Every day has its own tab on the left. Tap a day below to open it.")
+    .setAttributes(st({ FONT_FAMILY: "Roboto", FONT_SIZE: 9.5, ITALIC: true, BOLD: false, FOREGROUND_COLOR: "#8A86A6" })).setSpacingAfter(16);
+  dates.forEach((d) => {
+    const i = info[d] || {};
+    const v = i.verdict && VERDICT[i.verdict];
+    const p = body.appendParagraph("");
+    p.setAttributes(st({ FONT_FAMILY: "Lora", FONT_SIZE: 12, BOLD: false, ITALIC: false, FOREGROUND_COLOR: C.night })).setSpacingBefore(6).setSpacingAfter(i.summary ? 1 : 6);
+    p.appendText(v ? v.dot + "  " : "⚪  ");
+    p.appendText(longKey(d, fr)).setLinkUrl(docUrl(reg.doc, reg.tabs[d])).setBold(true).setForegroundColor(C.violet);
+    if (i.title) p.appendText("  —  " + i.title).setLinkUrl(null).setBold(false).setForegroundColor(C.night);
+    if (i.meta && i.meta.score !== "" && i.meta.score != null && !isNaN(Number(i.meta.score))) {
+      p.appendText(`   ${Math.round(Number(i.meta.score))}/100`).setLinkUrl(null).setBold(false).setFontSize(9.5).setForegroundColor("#8A86A6");
+    }
+    if (i.summary) {
+      body.appendParagraph(String(i.summary)).setAttributes(st({ FONT_FAMILY: "Lora", FONT_SIZE: 10, BOLD: false, ITALIC: false, FOREGROUND_COLOR: "#6A6688" }))
+        .setIndentStart(24).setIndentFirstLine(24).setSpacingAfter(8);
+    }
+  });
+  doc.saveAndClose();
+}
+
+/** Copies a whole Doc body (text, tables, photos) into another body. */
+function copyBody(src, dst) {
+  dst.clear();
+  const T = DocumentApp.ElementType;
+  for (let i = 0; i < src.getNumChildren(); i++) {
+    const el = src.getChild(i).copy(), t = el.getType();
+    if (t === T.PARAGRAPH) dst.appendParagraph(el.asParagraph());
+    else if (t === T.LIST_ITEM) dst.appendListItem(el.asListItem());
+    else if (t === T.TABLE) dst.appendTable(el.asTable());
+  }
+  const f = dst.getChild(0);
+  if (dst.getNumChildren() > 1 && f.getType() === T.PARAGRAPH && !f.asParagraph().getText() && f.asParagraph().getNumChildren() === 0) f.removeFromParent();
+}
+
+/**
+ * Moves every older day (one Doc each) into its month Doc as a tab, then puts the old Doc in the Drive bin
+ * (recoverable for 30 days). Works in batches: whatever doesn't fit in one run continues every hour.
+ */
+function organiseJournal(auto) {
+  const p = PropertiesService.getScriptProperties();
+  if (!hasDocsApi()) return { ok: false, moved: 0, left: 0 };
+  const sh = storeSheet();
+  if (sh.getLastRow() < 2) { p.deleteProperty("ORGANISE_LEFT"); return { ok: true, moved: 0, left: 0 }; }
+  const rows = sh.getRange(2, 1, sh.getLastRow() - 1, SCOLS.length).getValues();
+  const start = Date.now(), budget = auto ? 120000 : 270000;
+  const months = {};
+  let moved = 0, left = 0;
+  rows.forEach((r, i) => {
+    const date = String(r[0]), docId = r[S("docId") - 1], tabId = r[S("tabId") - 1];
+    if (!docId || tabId) return;
+    if (Date.now() - start > budget) { left++; return; }
+    let src;
+    try { src = DocumentApp.openById(docId); }
+    catch (err) {
+      // The old Doc was deleted by hand: nothing to copy, so the day is written again on the next polish.
+      sh.getRange(i + 2, S("docId")).setValue("");
+      sh.getRange(i + 2, S("processedHash")).setValue("");
+      return;
+    }
+    try {
+      const verdict = r[S("verdict") - 1], title = r[S("title") - 1], summary = r[S("summary") - 1];
+      const t = dayTab(date, verdict, title);
+      const doc = DocumentApp.openById(t.docId);
+      copyBody(src.getBody(), doc.getTab(t.tabId).asDocumentTab().getBody());
+      doc.saveAndClose();
+      sh.getRange(i + 2, S("docId")).setValue(t.docId);
+      sh.getRange(i + 2, S("tabId")).setValue(t.tabId);
+      setManaged(date, verdict, docUrl(t.docId, t.tabId), title ? `${title}. ${summary}` : summary);
+      trashOld(docId);
+      months[t.ym] = 1;
+      moved++;
+    } catch (err) { console.error("Organise", date, err); left++; }
+  });
+  Object.keys(months).forEach((ym) => { try { refreshCover(ym); } catch (e) { console.warn("Cover", e); } });
+  if (left) p.setProperty("ORGANISE_LEFT", String(left)); else p.deleteProperty("ORGANISE_LEFT");
+  return { ok: true, moved: moved, left: left };
+}
+
+function organiseJournalMenu() {
+  const ui = SpreadsheetApp.getUi();
+  if (!hasDocsApi()) {
+    ui.alert("One step first", "In the Apps Script editor (Extensions → Apps Script), click the ＋ next to “Services” on the left, choose “Google Docs API”, click Add, then run this again.", ui.ButtonSet.OK);
+    return;
+  }
+  const r = organiseJournal(false);
+  ui.alert("Journal organised", `${r.moved} day${r.moved === 1 ? "" : "s"} moved into monthly Docs, one tab per day. The old daily Docs are in your Drive bin for 30 days in case you want one back.` +
+    (r.left ? `\n\n${r.left} more will move by themselves over the next hours.` : ""), ui.ButtonSet.OK);
+}
+
+function lettersFolder() {
+  const parent = journalFolder();
+  const it = parent.getFoldersByName("Weekly letters");
+  return it.hasNext() ? it.next() : parent.createFolder("Weekly letters");
+}
+
+/** Where this week's letter goes: a new tab (newest first) in the year's "Weekly letters" Doc. */
+function letterTarget(endK, week) {
+  const tabName = `✉️ ${week}`;
+  if (hasDocsApi()) {
+    try {
+      const y = endK.slice(0, 4), key = "WL_" + y, p = PropertiesService.getScriptProperties();
+      let reg = null;
+      try { reg = JSON.parse(p.getProperty(key) || "null"); } catch (e) { reg = null; }
+      if (reg) { try { if (DriveApp.getFileById(reg.doc).isTrashed()) reg = null; } catch (e) { reg = null; } }
+      let tabId;
+      if (!reg) {
+        const d = DocumentApp.create(`Muhasaba · ${appCtx().fr ? "Lettres de la semaine" : "Weekly letters"} ${y}`);
+        tabId = d.getTabs()[0].getId();
+        d.saveAndClose();
+        DriveApp.getFileById(d.getId()).moveTo(lettersFolder());
+        reg = { doc: d.getId() };
+        p.setProperty(key, JSON.stringify(reg));
+        docsBatch(reg.doc, [{ updateDocumentTabProperties: { tabProperties: { tabId: tabId, title: tabName }, fields: "title" } }]);
+      } else {
+        const r = docsBatch(reg.doc, [{ addDocumentTab: { tabProperties: { title: tabName, index: 0 } } }]);
+        tabId = r.replies[0].addDocumentTab.tabProperties.tabId;
+      }
+      const doc = DocumentApp.openById(reg.doc);
+      return { doc: doc, body: doc.getTab(tabId).asDocumentTab().getBody(), url: docUrl(reg.doc, tabId) };
+    } catch (err) { console.error("Letter tab failed, using its own Doc", err); }
+  }
+  const doc = DocumentApp.create(`Muhasaba · Week of ${week}`);
+  DriveApp.getFileById(doc.getId()).moveTo(lettersFolder());
+  return { doc: doc, body: doc.getBody(), url: doc.getUrl() };
 }
 
 /* ------------------------------------------------------------------ photos */
@@ -972,6 +1257,7 @@ function setup() {
   journalFolder();
   photoFolder();
   videoFolder();
+  futureSheet();
   ScriptApp.getProjectTriggers().filter((t) => t.getHandlerFunction() === "processJournals").forEach((t) => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger("processJournals").timeBased().everyMinutes(15).create();
   // One hourly heartbeat: nightly reminder email, Insights refresh, Sunday weekly letter.
@@ -991,6 +1277,10 @@ function onOpen() {
     .addItem("Polish journals now", "processAllNow")
     .addItem("Polish all journals again", "repolishAllMenu")
     .addItem("Open journal folder", "showFolder")
+    .addItem("Organise journal: one Doc per month, a tab per day", "organiseJournalMenu")
+    .addSeparator()
+    .addItem("Future me: letters waiting", "futureStatusMenu")
+    .addItem("Future me: send me a sample letter now", "testFutureLetter")
     .addSeparator()
     .addItem("Refresh Insights now", "buildInsights")
     .addItem("Write this week's letter now", "weeklyLetterMenu")
@@ -1719,6 +2009,8 @@ function tick() {
     p.setProperty("INSIGHTS_DAY", dayK);
     try { buildInsights(); } catch (err) { console.error("Insights failed", err); }
   }
+  try { deliverFuture(false); } catch (err) { console.error("Future letters failed", err); }
+  if (p.getProperty("ORGANISE_LEFT")) { try { organiseJournal(true); } catch (err) { console.error("Organise failed", err); } }
   if (dow === "7" && hour >= LETTER_HOUR && p.getProperty("LETTER_DAY") !== dayK) {
     p.setProperty("LETTER_DAY", dayK);
     try { weeklyLetter(dayK); } catch (err) { console.error("Weekly letter failed", err); }
@@ -1816,11 +2108,10 @@ function weeklyLetter(endK) {
   if (!L) L = { title: `Your week: ${avgW}/100`, opening: "No AI key, so here are your numbers.", wins: [], hard: [], pattern: "", focus: "", dua: "" };
 
   const week = `${Utilities.formatDate(days[0].d, ctx.tz, "d MMM")} – ${Utilities.formatDate(days[days.length - 1].d, ctx.tz, "d MMM yyyy")}`;
-  const folder = (() => { const parent = journalFolder(); const it = parent.getFoldersByName("Weekly letters"); return it.hasNext() ? it.next() : parent.createFolder("Weekly letters"); })();
-  const doc = DocumentApp.create(`Muhasaba · Week of ${week}`);
-  DriveApp.getFileById(doc.getId()).moveTo(folder);
-  const body = doc.getBody();
-  body.setMarginLeft(56).setMarginRight(56);
+  const target = letterTarget(endK, week, L.title || "");
+  const doc = target.doc;
+  const body = target.body;
+  try { body.setMarginLeft(56).setMarginRight(56); } catch (e) { /* margins are per Doc */ }
   const A = DocumentApp.Attribute;
   const style = (o) => { const x = {}; Object.keys(o).forEach((k) => (x[A[k]] = o[k])); return x; };
   const H = (t, lvl) => { const h = body.appendParagraph(t); h.setHeading(lvl); h.setAttributes(style({ FOREGROUND_COLOR: C.night, FONT_FAMILY: "Roboto", BOLD: true })); return h; };
@@ -1850,7 +2141,7 @@ function weeklyLetter(endK) {
     du.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
   }
   doc.saveAndClose();
-  const url = doc.getUrl();
+  const url = target.url;
 
   const p = PropertiesService.getScriptProperties();
   const letters = JSON.parse(p.getProperty("LETTERS") || "[]");
@@ -1960,4 +2251,240 @@ function buildDashboard(force) {
   d.getRange("B69").setValue("This sheet fills itself from the Muhasaba app. Edits made here are overwritten the next time you change that day in the app. Day type comes from your journal.")
     .setFontColor("#8A86A6").setFontStyle("italic");
   return d;
+}
+
+/* ================================================================== future me */
+
+/**
+ * Letters to your future self. The app sends the letter once, sealed; it waits in a hidden tab and the app can
+ * never show it again. When its day comes (checked every hour, from 9:00), the script lays it out as a special
+ * Google Doc in "Muhasaba Journal / Future me" and emails you that it's ready to read.
+ */
+const FUTURE = "_future";
+const FCOLS = ["id", "written", "due", "text", "lang", "name", "hijri", "snap", "status", "docId", "deliveredAt"];
+const FC = (k) => FCOLS.indexOf(k) + 1;
+const FUTURE_MAX_DAYS = 3 * 366 + 1;
+
+function futureSheet() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(FUTURE);
+  if (!sh) {
+    sh = ss.insertSheet(FUTURE);
+    sh.getRange(1, 1, 1, FCOLS.length).setValues([FCOLS]).setFontWeight("bold");
+    sh.getRange(1, 1, 1, 1).setNote("Sealed letters to your future self. Each one is delivered as a Google Doc on its day. Best not to read them here.");
+    sh.hideSheet();
+  }
+  return sh;
+}
+
+function futureRows() {
+  const sh = futureSheet();
+  if (sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, FCOLS.length).getDisplayValues().map((v, i) => {
+    const o = { row: i + 2 };
+    FCOLS.forEach((k, j) => (o[k] = v[j]));
+    return o;
+  });
+}
+
+function daysBetween(a, b) {
+  const x = keyParts(a), y = keyParts(b);
+  return Math.round((Date.UTC(y.y, y.m - 1, y.d) - Date.UTC(x.y, x.m - 1, x.d)) / 864e5);
+}
+const wordCount = (t) => (String(t || "").trim() ? String(t).trim().split(/\s+/).length : 0);
+
+/** App calls: seal a letter, cancel one, or list them (never with their text). */
+function futureApi(body) {
+  const sh = futureSheet();
+  const today = Utilities.formatDate(new Date(), appCtx().tz, "yyyy-MM-dd");
+  if (body.future) {
+    const f = body.future;
+    const id = String(f.id || "").replace(/[^\w-]/g, "").slice(0, 40);
+    const text = String(f.text || "").slice(0, 45000);
+    const due = String(f.due || "");
+    if (!id || !text.trim()) throw new Error("The letter is empty.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || due <= today || due > shiftKey(today, FUTURE_MAX_DAYS)) throw new Error("Pick a date between tomorrow and 3 years from now.");
+    if (!futureRows().some((r) => r.id === id)) {
+      const r = sh.getLastRow() + 1;
+      const rng = sh.getRange(r, 1, 1, FCOLS.length);
+      rng.setNumberFormat("@");
+      rng.setValues([[id, String(f.written || today).slice(0, 10), due, text, f.lang === "fr" ? "fr" : "en", String(f.name || "").slice(0, 60),
+        String(f.hijri || "").slice(0, 60), JSON.stringify(f.snap || {}).slice(0, 2000), "sealed", "", ""]]);
+    }
+  }
+  if (body.futureCancel) {
+    const r = futureRows().find((x) => x.id === String(body.futureCancel));
+    if (r && r.status === "sealed") {
+      sh.getRange(r.row, FC("text")).setValue("");
+      sh.getRange(r.row, FC("status")).setValue("cancelled");
+    }
+  }
+  return {
+    future: futureRows().filter((r) => r.status === "sealed" || r.status === "delivered").map((r) => ({
+      id: r.id, written: r.written, due: r.due, status: r.status, words: wordCount(r.text), url: r.docId ? docUrl(r.docId, "") : "",
+    })),
+  };
+}
+
+function futureFolder() {
+  const parent = journalFolder();
+  const it = parent.getFoldersByName("Future me");
+  return it.hasNext() ? it.next() : parent.createFolder("Future me");
+}
+
+/** "6 months" / "1 year" / "1 an" … between two dates. */
+function spanLabel(a, b, fr) {
+  const x = keyParts(a), y = keyParts(b);
+  let months = (y.y - x.y) * 12 + (y.m - x.m) - (y.d < x.d ? 1 : 0);
+  const days = Math.round((Date.UTC(y.y, y.m - 1, y.d) - Date.UTC(x.y, x.m - 1, x.d)) / 864e5);
+  if (months < 1) return fr ? `${days} jour${days > 1 ? "s" : ""}` : `${days} day${days > 1 ? "s" : ""}`;
+  if (months % 12 === 0) { const n = months / 12; return fr ? `${n} an${n > 1 ? "s" : ""}` : `${n} year${n > 1 ? "s" : ""}`; }
+  if (months > 12) { const n = Math.floor(months / 12), m = months % 12; return fr ? `${n} an${n > 1 ? "s" : ""} et ${m} mois` : `${n} year${n > 1 ? "s" : ""} and ${m} month${m > 1 ? "s" : ""}`; }
+  return fr ? `${months} mois` : `${months} month${months > 1 ? "s" : ""}`;
+}
+
+/** Then-and-now numbers for the letter: average score over 30 days, Mushaf page, days logged since. */
+function thenAndNow(r, today) {
+  let snap = {};
+  try { snap = JSON.parse(r.snap || "{}"); } catch (e) { snap = {}; }
+  const days = readDays();
+  const last30 = days.filter((d) => d.key > shiftKey(today, -30) && d.key <= today);
+  const since = days.filter((d) => d.key > r.written && d.key <= today);
+  const pagesSince = since.reduce((a, d) => a + (d.pages || 0), 0);
+  return {
+    avgThen: snap.avg30 != null ? Math.round(snap.avg30) : null,
+    avgNow: last30.length ? Math.round(avgOf(last30.map((d) => d.score))) : null,
+    pageThen: snap.page != null ? Number(snap.page) : null,
+    pageNow: snap.page != null ? Number(snap.page) + pagesSince : null,
+    pagesSince: pagesSince,
+    loggedSince: since.length,
+  };
+}
+
+/** The letter as a Google Doc: cream paper, a seal, the letter in large serif type, then-and-now, a duʿāʾ. */
+function futureDoc(r, today) {
+  const fr = r.lang === "fr";
+  const T = (en, f) => (fr ? f : en);
+  const span = spanLabel(r.written, today, fr);
+  const doc = DocumentApp.create(`✉️ ${T("Letter from your past self", "Lettre de toi d'avant")} · ${longKey(r.written, fr)}`);
+  DriveApp.getFileById(doc.getId()).moveTo(futureFolder());
+  const body = doc.getBody();
+  body.setMarginTop(64).setMarginBottom(64).setMarginLeft(72).setMarginRight(72);
+  const A = DocumentApp.Attribute;
+  const st = (o) => { const x = {}; Object.keys(o).forEach((k) => (x[A[k]] = o[k])); return x; };
+  const CENTER = DocumentApp.HorizontalAlignment.CENTER;
+  const INK = "#2A2840", MUTED = "#8A86A6", GOLD = "#B97A12";
+  const line = (t, o) => body.appendParagraph(t).setAttributes(st(Object.assign({ FONT_FAMILY: "Roboto", FONT_SIZE: 10, BOLD: false, ITALIC: false, FOREGROUND_COLOR: MUTED }, o || {})));
+  const dots = () => line("·   ·   ·", { FONT_SIZE: 14, FOREGROUND_COLOR: GOLD }).setAlignment(CENTER).setSpacingBefore(14).setSpacingAfter(14);
+
+  const seal = body.getParagraphs()[0];
+  seal.setText("✉").setAttributes(st({ FONT_SIZE: 34, FOREGROUND_COLOR: GOLD })).setAlignment(CENTER).setSpacingAfter(4);
+  line(`${T("SEALED ON", "SCELLÉE LE")} ${longKey(r.written, fr).toUpperCase()}${r.hijri ? "  ·  " + r.hijri.toUpperCase() : ""}`, { FONT_SIZE: 8.5, BOLD: true, FOREGROUND_COLOR: GOLD })
+    .setAlignment(CENTER).setSpacingAfter(10);
+  const title = body.appendParagraph(T(`A letter from ${span} ago`, `Une lettre d'il y a ${span}`));
+  title.setHeading(DocumentApp.ParagraphHeading.TITLE);
+  title.setAttributes(st({ FONT_FAMILY: "Poppins", FONT_SIZE: 26, BOLD: true, ITALIC: false, FOREGROUND_COLOR: C.night })).setAlignment(CENTER).setSpacingAfter(4);
+  line(T(`Written by ${r.name || "you"} on ${longKey(r.written, false)}. Opened on ${longKey(today, false)}.`,
+    `Écrite par ${r.name || "toi"} le ${longKey(r.written, true)}. Ouverte le ${longKey(today, true)}.`), { ITALIC: true }).setAlignment(CENTER);
+  dots();
+
+  String(r.text || "").replace(/\r/g, "").split(/\n/).map((x) => x.trim()).filter(Boolean).forEach((t) => {
+    body.appendParagraph(t).setAttributes(st({ FONT_FAMILY: "Lora", FONT_SIZE: 13, BOLD: false, ITALIC: false, FOREGROUND_COLOR: INK }))
+      .setLineSpacing(1.6).setSpacingAfter(10);
+  });
+  dots();
+
+  const n = thenAndNow(r, today);
+  const rows = [];
+  if (n.avgThen != null || n.avgNow != null) rows.push([T("Average score, last 30 days", "Score moyen, 30 derniers jours"), n.avgThen != null ? `${n.avgThen}/100` : "–", n.avgNow != null ? `${n.avgNow}/100` : "–"]);
+  if (n.pageThen != null) rows.push([T("Page reached in the Mushaf", "Page atteinte dans le Mushaf"), String(n.pageThen), `${n.pageNow}${n.pagesSince ? `  (+${n.pagesSince})` : ""}`]);
+  rows.push([T("Days logged since", "Jours notés depuis"), "", String(n.loggedSince)]);
+  const h = body.appendParagraph(T("Then and now", "Avant et maintenant"));
+  h.setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  h.setAttributes(st({ FONT_FAMILY: "Poppins", FONT_SIZE: 14, BOLD: true, ITALIC: false, FOREGROUND_COLOR: C.violet })).setSpacingAfter(6);
+  const t = body.appendTable([["", T("Then", "Alors"), T("Now", "Maintenant")]].concat(rows));
+  t.setBorderColor("#E8DFC9");
+  t.setAttributes(st({ FONT_FAMILY: "Roboto", FONT_SIZE: 10.5, FOREGROUND_COLOR: INK }));
+  const hr = t.getRow(0);
+  for (let i = 0; i < hr.getNumCells(); i++) hr.getCell(i).setBackgroundColor("#F3EAD6").editAsText().setBold(true).setForegroundColor(GOLD);
+  for (let i = 1; i < t.getNumRows(); i++) t.getRow(i).getCell(2).editAsText().setBold(true);
+
+  body.appendParagraph("");
+  line("يَا مُقَلِّبَ الْقُلُوبِ ثَبِّتْ قَلْبِي عَلَى دِينِكَ", { FONT_FAMILY: "Amiri", FONT_SIZE: 17, FOREGROUND_COLOR: C.night }).setAlignment(CENTER).setSpacingBefore(10);
+  line(T("“O Turner of hearts, keep my heart firm upon Your religion.” (at-Tirmidhī)", "« Ô Toi qui retournes les cœurs, affermis mon cœur sur Ta religion. » (at-Tirmidhī)"), { ITALIC: true, FONT_SIZE: 10 })
+    .setAlignment(CENTER).setSpacingAfter(18);
+  line(T("Read it slowly. Then, from the Journal in Muhasaba, write the next one.", "Lis-la doucement. Puis, depuis le Journal de Muhasaba, écris la suivante."), { FONT_SIZE: 9 }).setAlignment(CENTER);
+  doc.saveAndClose();
+  if (hasDocsApi()) {
+    try { docsBatch(doc.getId(), [{ updateDocumentStyle: { documentStyle: { background: { color: { color: { rgbColor: { red: 0.984, green: 0.965, blue: 0.925 } } } } }, fields: "background" } }]); }
+    catch (e) { console.warn("Paper colour", e); }
+  }
+  return doc;
+}
+
+function futureMail(r, url, today, sample) {
+  const fr = r.lang === "fr";
+  const T = (en, f) => (fr ? f : en);
+  const span = spanLabel(r.written, today, fr);
+  const hi = r.name ? `As-salāmu ʿalaykum ${r.name},` : "As-salāmu ʿalaykum,";
+  MailApp.sendEmail({
+    to: Session.getEffectiveUser().getEmail(),
+    name: "Muhasaba",
+    subject: `${sample ? "[" + T("Sample", "Exemple") + "] " : ""}📬 ${T("A letter from your past self is ready", "Une lettre de toi d'avant est arrivée")}`,
+    htmlBody: `<div style="font-family:Georgia,serif;font-size:16px;color:#1B1F4B;line-height:1.6;max-width:520px">
+      <p style="font-size:34px;margin:0;color:#B97A12">✉</p>
+      <p>${hi}</p>
+      <p>${T(`${span} ago, on ${longKey(r.written, false)}, you sealed a letter and asked for it to reach you today. It's ready.`, `Il y a ${span}, le ${longKey(r.written, true)}, tu as scellé une lettre pour qu'elle t'arrive aujourd'hui. Elle est prête.`)}</p>
+      <p><a href="${url}" style="display:inline-block;background:#1B1F4B;color:#fff;padding:12px 22px;border-radius:12px;text-decoration:none;font-family:Arial,sans-serif;font-weight:bold">${T("Open the letter", "Ouvrir la lettre")}</a></p>
+      <p style="color:#8A86A6;font-size:12px;font-family:Arial,sans-serif">${T("It's in your Drive, in Muhasaba Journal → Future me.", "Elle est dans ton Drive, dans Muhasaba Journal → Future me.")}</p></div>`,
+  });
+}
+
+/** Hourly: deliver every sealed letter whose day has come (from 9:00 your time). */
+function deliverFuture(force) {
+  const ctx = appCtx();
+  const now = new Date();
+  const today = Utilities.formatDate(now, ctx.tz, "yyyy-MM-dd");
+  if (!force && Number(Utilities.formatDate(now, ctx.tz, "H")) < 9) return 0;
+  const sh = futureSheet();
+  let n = 0;
+  futureRows().filter((r) => r.status === "sealed" && r.due <= today).forEach((r) => {
+    try {
+      const doc = futureDoc(r, today);
+      sh.getRange(r.row, FC("status")).setValue("delivered");
+      sh.getRange(r.row, FC("docId")).setValue(doc.getId());
+      sh.getRange(r.row, FC("deliveredAt")).setValue(today);
+      n++;
+      try { futureMail(r, doc.getUrl(), today, false); } catch (err) { console.error("Future letter email", err); }
+    } catch (err) { console.error("Future letter", r.id, err); }
+  });
+  return n;
+}
+
+function futureStatusMenu() {
+  const ctx = appCtx();
+  const today = Utilities.formatDate(new Date(), ctx.tz, "yyyy-MM-dd");
+  const rows = futureRows().filter((r) => r.status === "sealed").sort((a, b) => (a.due < b.due ? -1 : 1));
+  const done = futureRows().filter((r) => r.status === "delivered").length;
+  const list = rows.map((r) => {
+    const d = daysBetween(today, r.due);
+    return `✉  Sealed ${r.written} → opens ${longKey(r.due, false)} (in ${d} day${d === 1 ? "" : "s"})`;
+  });
+  SpreadsheetApp.getUi().alert("Future me", (list.length ? list.join("\n") : "No sealed letters yet. Write one from the Journal in the app.") + (done ? `\n\n${done} already delivered (Drive → Muhasaba Journal → Future me).` : ""), SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/** Shows what a delivered letter looks like (a sample text dated a year ago), and sends the email. */
+function testFutureLetter() {
+  const ctx = appCtx();
+  const today = Utilities.formatDate(new Date(), ctx.tz, "yyyy-MM-dd");
+  const fr = ctx.fr;
+  const r = {
+    written: shiftKey(today, -365), lang: fr ? "fr" : "en", name: ctx.name, hijri: "", snap: "{}",
+    text: fr
+      ? "Ceci est un exemple, pour voir à quoi ressemble une lettre le jour où elle arrive.\nTes vraies lettres s'écrivent depuis le Journal de l'app : écris-toi, scelle, et oublie-la jusqu'au jour J."
+      : "This is a sample, so you can see what a letter looks like on the day it arrives.\nYour real letters are written from the Journal in the app: write to yourself, seal it, and forget about it until the day comes.",
+  };
+  const doc = futureDoc(r, today);
+  futureMail(r, doc.getUrl(), today, true);
+  SpreadsheetApp.getActive().toast("Sample letter created in Drive → Muhasaba Journal → Future me, and emailed to you.", "Muhasaba");
 }

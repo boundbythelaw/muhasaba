@@ -876,3 +876,43 @@ html { scroll-padding-top: 76px; }
 .musicrow b { color: var(--ink); }
 .musicopts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
 .countmode { padding-top: max(76px, calc(env(safe-area-inset-top) + 64px)); }
+
+/* ---------- v14: Future me ---------- */
+.future { overflow: hidden; }
+.fm-hero { display: flex; gap: 14px; align-items: center; }
+.fm-hero .sub { margin: 0; }
+.fm-env { flex: 0 0 84px; width: 84px; height: 64px; overflow: visible; }
+.e-body { fill: var(--gold-soft); stroke: var(--gold); stroke-width: 2.5; }
+.e-flap { fill: none; stroke: var(--gold); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.e-seal { fill: #B8322A; }
+.e-tick { fill: none; stroke: #FFE9D6; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.fm-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.fm-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; background: var(--raised); border: 1px solid var(--line); color: inherit; text-decoration: none; min-width: 0; }
+.fm-row.arrived { background: linear-gradient(135deg, var(--gold-soft), var(--raised)); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
+.fm-ic { flex: 0 0 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; font-size: 20px; background: var(--surface); }
+.fm-ic.fm-sealic svg { width: 26px; height: 20px; overflow: visible; }
+.fm-ic.fm-sealic .e-body, .fm-ic.fm-sealic .e-flap { stroke-width: 7; }
+.fm-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fm-tx b { font-size: 14px; overflow-wrap: anywhere; }
+.fm-tx small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.fm-row.arrived small { color: var(--gold); font-weight: 700; }
+.fm-bar { display: block; height: 5px; border-radius: 99px; background: var(--line); overflow: hidden; margin-top: 4px; }
+.fm-bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--gold), #E58A3A); }
+.fm-x { flex: 0 0 auto; font-size: 20px !important; color: var(--muted) !important; text-decoration: none !important; padding: 4px 6px !important; align-self: center !important; }
+.fm-write { margin-top: 14px; background: linear-gradient(135deg, #C98A1E, #8A5200); color: #fff; box-shadow: 0 10px 24px -14px #B97A12; }
+.fm-pen { font-size: 24px; }
+.fm-compose h3 { font-size: 21px; }
+.fm-when { margin-top: -6px; }
+.fm-paper { border-radius: 18px; padding: 4px; background-position: 0 -6px !important; background: repeating-linear-gradient(transparent 0 31px, color-mix(in srgb, var(--gold) 18%, transparent) 31px 32px), #FBF6EC; border: 1px solid #E8DFC9; }
+:root[data-theme="dark"] .fm-paper { background: repeating-linear-gradient(transparent 0 31px, rgb(242 184 75 / .12) 31px 32px), #1C1A2E; border-color: #3A3350; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .fm-paper { background: repeating-linear-gradient(transparent 0 31px, rgb(242 184 75 / .12) 31px 32px), #1C1A2E; border-color: #3A3350; } }
+.fm-text { width: 100%; min-height: 200px; border: none; background: transparent; resize: none; padding: 0 12px 8px; font-family: Georgia, "Lora", serif; font-size: 17px; line-height: 32px; color: var(--ink); }
+.fm-text:focus-visible { outline: none; }
+.fm-seal { background: linear-gradient(135deg, #B8322A, #7E1E18); color: #fff; }
+.fm-moment { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgb(10 13 30 / .88); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.fm-stage { display: flex; flex-direction: column; align-items: center; gap: 18px; position: relative; padding: 16px; text-align: center; }
+.fm-big { width: min(240px, 64vw); height: auto; overflow: visible; }
+.fm-big .e-body { fill: #FCEFD3; stroke: #F2B84B; }
+.fm-big .e-flap { stroke: #B97A12; }
+.fm-sheet { position: absolute; top: 40px; width: min(190px, 50vw); height: 120px; border-radius: 8px; background: #FBF6EC; box-shadow: 0 10px 30px rgb(0 0 0 / .3); transform-origin: 50% 100%; }
+.fm-stage p { margin: 0; color: #F7EBD2; font-family: var(--f-display); font-weight: 700; font-size: 19px; text-wrap: balance; }

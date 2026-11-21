@@ -2,6 +2,7 @@
 import { getLang, tr } from "@/lib/i18n";
 import { useDictation } from "@/lib/dictation";
 import VoiceNote from "./VoiceNote";
+import FutureCard from "./FutureMe";
 import { discardMedia, Lightbox, PhotoButtons, Thumb } from "./Photos";
 import { MAX_PHOTOS } from "@/lib/photos";
 import { AnimatePresence, motion } from "framer-motion";
@@ -285,6 +286,8 @@ export default function JournalView() {
           )}
         </AnimatePresence>
       </section>
+
+      <FutureCard />
 
       <p className="foot">{tr("Your journal stays on your phone and in your own Google Drive. The sheet only shows the rating and a link.")}</p>
     </>
