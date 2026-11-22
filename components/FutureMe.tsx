@@ -5,10 +5,14 @@ import { createPortal } from "react-dom";
 import { addDays, hijri, keyOf, parseKey, todayKey } from "@/lib/dates";
 import { ask, burst, haptic, toast } from "@/lib/fx";
 import { getLang, loc, num, tr } from "@/lib/i18n";
+import { deletePhoto, fmtDur, posterId, usePhotoUrl } from "@/lib/photos";
+import { asSheetMedia, uploadLetterMedia } from "@/lib/futureUpload";
 import { pagesBefore, scoreDay } from "@/lib/scoring";
 import { postToSheet, type FutureLetter } from "@/lib/sheetSync";
 import { useStore } from "@/lib/store";
+import { PhotoButtons } from "./Photos";
 import { BottomSheet } from "./Sheets";
+import type { PhotoRef } from "@/lib/types";
 import { tap } from "./ui";
 
 const LIST_KEY = "muhasaba-future";
@@ -106,7 +110,7 @@ export default function FutureCard() {
                 <span className="fm-ic fm-sealic" aria-hidden="true"><svg viewBox="0 0 120 90"><rect x="8" y="14" width="104" height="66" rx="10" className="e-body" /><path d="M8 22 L60 54 L112 22" className="e-flap" /><circle cx="60" cy="54" r="12" className="e-seal" /></svg></span>
                 <span className="fm-tx">
                   <b>{tr("Opens {d}", { d: longDate(l.due) })}</b>
-                  <small className="num">{left === 0 ? tr("Arrives today, from 9:00") : tr(left === 1 ? "in 1 day" : "in {n} days", { n: num(left) })} · {tr("{n} words", { n: l.words })} · {tr("sealed {d}", { d: shortY(l.written) })}</small>
+                  <small className="num">{left === 0 ? tr("Arrives today, from 9:00") : tr(left === 1 ? "in 1 day" : "in {n} days", { n: num(left) })} · {tr("{n} words", { n: l.words })}{l.media ? ` · ${l.media} 📎` : ""} · {tr("sealed {d}", { d: shortY(l.written) })}</small>
                   <span className="fm-bar"><motion.i initial={{ width: 0 }} animate={{ width: `${Math.min(100, ((total - left) / total) * 100)}%` }} transition={{ type: "spring", stiffness: 60, damping: 18 }} /></span>
                 </span>
                 <button className="linkbtn fm-x" onClick={() => void cancel(l)} aria-label={tr("Cancel this letter")}>×</button>
@@ -147,16 +151,28 @@ function Composer({ open, onClose, onSealed }: { open: boolean; onClose: () => v
   const [text, setText] = useState("");
   const [span, setSpan] = useState<number | "date">(12);
   const [custom, setCustom] = useState(addMonths(today, 6));
+  const [media, setMedia] = useState<PhotoRef[]>([]);
   const [busy, setBusy] = useState(false);
+  const [up, setUp] = useState<{ i: number; f: number } | null>(null);
   const [err, setErr] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { if (open) { const d = read<{ text: string; span: number | "date"; custom: string } | null>(DRAFT_KEY, null); if (d) { setText(d.text || ""); setSpan(d.span ?? 12); if (d.custom) setCustom(d.custom); } setErr(""); } }, [open]);
-  useEffect(() => { if (open) write(DRAFT_KEY, text.trim() ? { text, span, custom } : null); }, [text, span, custom, open]);
+  useEffect(() => {
+    if (!open) return;
+    const d = read<{ text: string; span: number | "date"; custom: string; media?: PhotoRef[] } | null>(DRAFT_KEY, null);
+    if (d) { setText(d.text || ""); setSpan(d.span ?? 12); if (d.custom) setCustom(d.custom); setMedia(d.media ?? []); }
+    setErr("");
+  }, [open]);
+  useEffect(() => { if (open) write(DRAFT_KEY, text.trim() || media.length ? { text, span, custom, media } : null); }, [text, span, custom, media, open]);
+  const removeMedia = (m: PhotoRef) => {
+    void deletePhoto(m.id);
+    if (m.kind === "video") void deletePhoto(posterId(m.id));
+    setMedia((xs) => xs.filter((x) => x.id !== m.id));
+  };
   useEffect(() => { const t = ref.current; if (t) { t.style.height = "auto"; t.style.height = `${Math.max(200, t.scrollHeight)}px`; } }, [text, open]);
 
   const minDate = addMonths(today, 1), maxDate = addDays(addMonths(today, 36), 0);
   const due = span === "date" ? custom : addMonths(today, span);
-  const valid = text.trim().length > 0 && due >= minDate && due <= maxDate;
+  const valid = (text.trim().length > 0 || media.length > 0) && due >= minDate && due <= maxDate;
   const snap = useMemo(() => {
     const last = Array.from({ length: 30 }, (_, i) => addDays(today, -i)).filter((k) => days[k]);
     const avg30 = last.length ? last.reduce((a, k) => a + scoreDay(days[k]).total, 0) / last.length : null;
@@ -166,9 +182,27 @@ function Composer({ open, onClose, onSealed }: { open: boolean; onClose: () => v
   const seal = async () => {
     if (!valid || !sheet.url) return;
     setBusy(true); setErr("");
-    const r = await postToSheet(sheet.url, { future: { id: newId(), written: today, due, text: text.trim(), lang: getLang(), name: prefs.name, hijri: hijri(today), snap } }, true);
+    let sent = media;
+    try {
+      if (media.length) {
+        sent = await uploadLetterMedia(sheet.url, today, media, (m) => { setMedia(m); write(DRAFT_KEY, { text, span, custom, media: m }); }, (i, f) => setUp({ i, f }));
+      }
+    } catch (e) {
+      setBusy(false); setUp(null);
+      const m = e instanceof Error ? e.message : "";
+      setErr(m === "offline" ? tr("You're offline. Your letter is kept here as a draft: seal it when you're back online.")
+        : m === "missing" ? tr("One photo or video isn't on this phone any more. Remove it and add it again.")
+        : m === "unreachable" || m === "script" ? tr("Your Apps Script didn't take the file. Paste the newest Code.gs and publish a new version (Déployer → Gérer les déploiements → ✏️ → Nouvelle version).")
+        : tr("The upload stopped. Tap Seal again: it carries on where it stopped."));
+      return;
+    }
+    setUp(null);
+    const r = await postToSheet(sheet.url, { future: { id: newId(), written: today, due, text: text.trim(), lang: getLang(), name: prefs.name, hijri: hijri(today), snap, media: asSheetMedia(sent) } }, true);
     setBusy(false);
     if (r.ok && r.future) {
+      // Sealed: the photos and videos leave this phone too, so nothing of the letter stays readable here.
+      sent.forEach((m) => { void deletePhoto(m.id); if (m.kind === "video") void deletePhoto(posterId(m.id)); });
+      setMedia([]);
       write(DRAFT_KEY, null);
       setText("");
       haptic([20, 40, 60]);
@@ -198,6 +232,10 @@ function Composer({ open, onClose, onSealed }: { open: boolean; onClose: () => v
         <div className="fm-paper">
           <textarea ref={ref} className="fm-text" value={text} onChange={(e) => setText(e.target.value)} placeholder={tr("Who you are today, what you're working on, what you hope for, what you're afraid of… Write it to the person reading it later.")} />
         </div>
+        <div className="fm-media">
+          {media.map((m) => <FmThumb key={m.id} m={m} onRemove={busy ? undefined : () => removeMedia(m)} />)}
+          {media.length < 4 && <PhotoButtons date={today} count={media.length} disabled={busy} onAdd={(refs) => setMedia((xs) => [...xs, ...refs].slice(0, 4))} />}
+        </div>
         {!text && (
           <div className="row">
             {STARTERS.map((s) => <motion.button key={s} className="pill prompt" {...tap} onClick={() => { setText(tr(s).replace(/…$/, " ")); ref.current?.focus(); }}>{tr(s)}</motion.button>)}
@@ -207,11 +245,25 @@ function Composer({ open, onClose, onSealed }: { open: boolean; onClose: () => v
         {err && <p className="note warnnote">⚠ {err}</p>}
         <div className="sheet-foot">
           <motion.button className="btn big fm-seal" {...tap} disabled={!valid || busy} onClick={(e) => { burst(e.clientX, e.clientY); void seal(); }}>
-            {busy ? <span className="spinner" aria-hidden="true" /> : "🔒 "}{tr(busy ? "Sealing…" : "Seal the letter")}
+            {busy ? <span className="spinner" aria-hidden="true" /> : "🔒 "}
+            {up ? tr("Uploading {i} of {n} · {p}%", { i: up.i + 1, n: media.length, p: Math.round(up.f * 100) }) : tr(busy ? "Sealing…" : "Seal the letter")}
           </motion.button>
         </div>
       </div>
     </BottomSheet>
+  );
+}
+
+function FmThumb({ m, onRemove }: { m: PhotoRef; onRemove?: () => void }) {
+  const url = usePhotoUrl(m.kind === "video" ? posterId(m.id) : m.id);
+  const done = m.kind === "video" ? !!(m.drive && m.poster) : !!m.drive;
+  return (
+    <motion.div className="fm-thumb" layout initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
+      {url ? <img src={url} alt="" draggable={false} /> : <span>{m.kind === "video" ? "🎬" : "📷"}</span>}
+      {m.kind === "video" && m.dur ? <small className="num">{fmtDur(m.dur)}</small> : null}
+      {done && <i aria-label={tr("Uploaded")}>✓</i>}
+      {onRemove && <button type="button" onClick={onRemove} aria-label={tr("Remove")}>×</button>}
+    </motion.div>
   );
 }
 

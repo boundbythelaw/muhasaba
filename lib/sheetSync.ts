@@ -120,7 +120,7 @@ export function buildRow(date: string, days: Record<string, DayLog>, prefs: Pref
 type Reply = { ok: boolean; schema?: number; error?: string; status?: number; days?: number; sheet?: string; saved?: number; blind?: boolean; ai?: string; processError?: string; drive?: string; next?: number; restart?: boolean; data?: string; mime?: string; docs?: Record<string, import("./types").DocInfo>; future?: FutureLetter[] };
 
 /** A sealed or delivered letter to future me, as the script lists it (never with its text). */
-export interface FutureLetter { id: string; written: string; due: string; status: "sealed" | "delivered"; words: number; url: string }
+export interface FutureLetter { id: string; written: string; due: string; status: "sealed" | "delivered"; words: number; media?: number; url: string }
 
 /**
  * POST as text/plain (a "simple" request, so the browser sends no preflight that Apps Script would reject).

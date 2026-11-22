@@ -1043,7 +1043,7 @@ function savePhoto(ph) {
   const bytes = Utilities.base64Decode(String(ph.data || ""));
   if (!bytes.length) throw new Error("The photo was empty.");
   if (bytes.length > 12 * 1024 * 1024) throw new Error("Photo too large.");
-  const folder = photoFolder();
+  const folder = ph.future ? sealedFolder() : photoFolder();
   const name = `${date} · ${id}.jpg`;
   const same = folder.getFilesByName(name);
   if (same.hasNext()) return { drive: same.next().getId() };
@@ -1113,13 +1113,14 @@ function videoPart(v) {
   const name = `${date} · ${id}.${/webm/.test(mime) ? "webm" : /quicktime/.test(mime) ? "mov" : "mp4"}`;
   let session = props.getProperty(key);
   if (!session) {
-    const done = videoFolder().getFilesByName(name);
+    const folder = v.future ? sealedFolder() : videoFolder();
+    const done = folder.getFilesByName(name);
     if (done.hasNext()) return { drive: done.next().getId() };
     const res = UrlFetchApp.fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true", {
       method: "post",
       contentType: "application/json; charset=UTF-8",
       headers: { Authorization: "Bearer " + ScriptApp.getOAuthToken(), "X-Upload-Content-Type": mime, "X-Upload-Content-Length": String(total) },
-      payload: JSON.stringify({ name: name, parents: [videoFolder().getId()], mimeType: mime }),
+      payload: JSON.stringify({ name: name, parents: [folder.getId()], mimeType: mime }),
       muteHttpExceptions: true,
     });
     const loc = res.getHeaders().Location || res.getHeaders().location;
@@ -1197,7 +1198,8 @@ const videoUrl = (m) => `https://drive.google.com/file/d/${m.v}/view`;
  *   4 → two rows of two.
  * Videos show their cover with a ▶ and link to the video in Drive, with a "Watch" line under the row.
  */
-function appendMedia(body, media, base) {
+function appendMedia(body, media, base, pageW) {
+  const PAGE = pageW || PAGE_W;
   const items = media.map((m) => ({ m: m, blob: mediaBlob(m) })).filter((x) => x.blob);
   if (!items.length) return;
   const GAP = 6, MAX_H = 360, MIN_ROW_H = 150;
@@ -1212,7 +1214,7 @@ function appendMedia(body, media, base) {
     return r;
   });
   const idx = items.map((_, i) => i);
-  const fitH = (row) => (PAGE_W - GAP * (row.length - 1)) / row.reduce((a, i) => a + shapes[i], 0);
+  const fitH = (row) => (PAGE - GAP * (row.length - 1)) / row.reduce((a, i) => a + shapes[i], 0);
   let rows;
   if (items.length <= 2) rows = [idx];
   else if (items.length === 3) rows = fitH(idx) >= MIN_ROW_H ? [idx] : [[0], [1, 2]];
@@ -2261,7 +2263,7 @@ function buildDashboard(force) {
  * Google Doc in "Muhasaba Journal / Future me" and emails you that it's ready to read.
  */
 const FUTURE = "_future";
-const FCOLS = ["id", "written", "due", "text", "lang", "name", "hijri", "snap", "status", "docId", "deliveredAt"];
+const FCOLS = ["id", "written", "due", "text", "lang", "name", "hijri", "snap", "status", "docId", "deliveredAt", "media"];
 const FC = (k) => FCOLS.indexOf(k) + 1;
 const FUTURE_MAX_DAYS = 3 * 366 + 1;
 
@@ -2274,8 +2276,18 @@ function futureSheet() {
     sh.getRange(1, 1, 1, 1).setNote("Sealed letters to your future self. Each one is delivered as a Google Doc on its day. Best not to read them here.");
     sh.hideSheet();
   }
+  if (sh.getMaxColumns() < FCOLS.length) sh.insertColumnsAfter(sh.getMaxColumns(), FCOLS.length - sh.getMaxColumns());
+  if (sh.getRange(1, FCOLS.length).getValue() !== FCOLS[FCOLS.length - 1]) sh.getRange(1, 1, 1, FCOLS.length).setValues([FCOLS]).setFontWeight("bold");
   return sh;
 }
+
+/** Photos and videos of sealed letters wait here until their letter is delivered. */
+function sealedFolder() {
+  const parent = futureFolder();
+  const it = parent.getFoldersByName("Sealed");
+  return it.hasNext() ? it.next() : parent.createFolder("Sealed");
+}
+const letterMedia = (r) => { try { return (JSON.parse(r.media || "[]") || []).map(mediaItem).filter(Boolean).slice(0, 8); } catch (e) { return []; } };
 
 function futureRows() {
   const sh = futureSheet();
@@ -2302,26 +2314,28 @@ function futureApi(body) {
     const id = String(f.id || "").replace(/[^\w-]/g, "").slice(0, 40);
     const text = String(f.text || "").slice(0, 45000);
     const due = String(f.due || "");
-    if (!id || !text.trim()) throw new Error("The letter is empty.");
+    if (!id || (!text.trim() && !(Array.isArray(f.media) && f.media.length))) throw new Error("The letter is empty.");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || due <= today || due > shiftKey(today, FUTURE_MAX_DAYS)) throw new Error("Pick a date between tomorrow and 3 years from now.");
     if (!futureRows().some((r) => r.id === id)) {
       const r = sh.getLastRow() + 1;
       const rng = sh.getRange(r, 1, 1, FCOLS.length);
       rng.setNumberFormat("@");
       rng.setValues([[id, String(f.written || today).slice(0, 10), due, text, f.lang === "fr" ? "fr" : "en", String(f.name || "").slice(0, 60),
-        String(f.hijri || "").slice(0, 60), JSON.stringify(f.snap || {}).slice(0, 2000), "sealed", "", ""]]);
+        String(f.hijri || "").slice(0, 60), JSON.stringify(f.snap || {}).slice(0, 2000), "sealed", "", "",
+        JSON.stringify((Array.isArray(f.media) ? f.media : []).map(mediaItem).filter(Boolean).slice(0, 8))]]);
     }
   }
   if (body.futureCancel) {
     const r = futureRows().find((x) => x.id === String(body.futureCancel));
     if (r && r.status === "sealed") {
+      letterMedia(r).forEach((m) => [typeof m === "string" ? m : m.v, m.p].filter(Boolean).forEach(trashOld));
       sh.getRange(r.row, FC("text")).setValue("");
       sh.getRange(r.row, FC("status")).setValue("cancelled");
     }
   }
   return {
     future: futureRows().filter((r) => r.status === "sealed" || r.status === "delivered").map((r) => ({
-      id: r.id, written: r.written, due: r.due, status: r.status, words: wordCount(r.text), url: r.docId ? docUrl(r.docId, "") : "",
+      id: r.id, written: r.written, due: r.due, status: r.status, words: wordCount(r.text), media: letterMedia(r).length, url: r.docId ? docUrl(r.docId, "") : "",
     })),
   };
 }
@@ -2392,6 +2406,12 @@ function futureDoc(r, today) {
     body.appendParagraph(t).setAttributes(st({ FONT_FAMILY: "Lora", FONT_SIZE: 13, BOLD: false, ITALIC: false, FOREGROUND_COLOR: INK }))
       .setLineSpacing(1.6).setSpacingAfter(10);
   });
+  const media = letterMedia(r);
+  if (media.length) {
+    body.appendParagraph("").setSpacingAfter(4);
+    try { appendMedia(body, media, st({ FONT_FAMILY: "Lora", FONT_SIZE: 11, BOLD: false, ITALIC: false, FOREGROUND_COLOR: INK }), 468); }
+    catch (err) { console.error("Letter media", err); }
+  }
   dots();
 
   const n = thenAndNow(r, today);
@@ -2454,6 +2474,8 @@ function deliverFuture(force) {
       sh.getRange(r.row, FC("status")).setValue("delivered");
       sh.getRange(r.row, FC("docId")).setValue(doc.getId());
       sh.getRange(r.row, FC("deliveredAt")).setValue(today);
+      // The letter's photos and videos leave the Sealed folder and sit next to their letter.
+      letterMedia(r).forEach((m) => [typeof m === "string" ? m : m.v, m.p].filter(Boolean).forEach((id) => { try { DriveApp.getFileById(id).moveTo(futureFolder()); } catch (e) { /* ok */ } }));
       n++;
       try { futureMail(r, doc.getUrl(), today, false); } catch (err) { console.error("Future letter email", err); }
     } catch (err) { console.error("Future letter", r.id, err); }

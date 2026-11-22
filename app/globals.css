@@ -916,3 +916,10 @@ html { scroll-padding-top: 76px; }
 .fm-big .e-flap { stroke: #B97A12; }
 .fm-sheet { position: absolute; top: 40px; width: min(190px, 50vw); height: 120px; border-radius: 8px; background: #FBF6EC; box-shadow: 0 10px 30px rgb(0 0 0 / .3); transform-origin: 50% 100%; }
 .fm-stage p { margin: 0; color: #F7EBD2; font-family: var(--f-display); font-weight: 700; font-size: 19px; text-wrap: balance; }
+.fm-media { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fm-media .photobtns { flex: 1 1 100%; }
+.fm-thumb { position: relative; width: 74px; height: 74px; border-radius: 14px; overflow: hidden; background: var(--raised); display: grid; place-items: center; border: 1px solid var(--line); }
+.fm-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.fm-thumb small { position: absolute; left: 5px; bottom: 5px; font-size: 10px; font-weight: 700; color: #fff; background: rgb(0 0 0 / .6); border-radius: 99px; padding: 1px 6px; }
+.fm-thumb i { position: absolute; left: 5px; top: 5px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 11px; font-weight: 800; color: #fff; background: var(--good, #1F9D63); }
+.fm-thumb button { position: absolute; right: 4px; top: 4px; width: 24px; height: 24px; border-radius: 50%; border: none; background: rgb(0 0 0 / .62); color: #fff; font-size: 16px; line-height: 1; display: grid; place-items: center; }

@@ -548,4 +548,9 @@ export const FR: Record<string, string> = {
   "Sealing…": "Scellage…",
   "Seal the letter": "Sceller la lettre",
   "Sealed. See you then, in shāʾ Allāh.": "Scellée. À bientôt, in shāʾ Allāh.",
+  "One photo or video isn't on this phone any more. Remove it and add it again.": "Une photo ou vidéo n'est plus sur ce téléphone. Retirez-la et ajoutez-la à nouveau.",
+  "Your Apps Script didn't take the file. Paste the newest Code.gs and publish a new version (Déployer → Gérer les déploiements → ✏️ → Nouvelle version).": "Votre Apps Script n'a pas accepté le fichier. Collez le nouveau Code.gs et publiez une nouvelle version (Déployer → Gérer les déploiements → ✏️ → Nouvelle version).",
+  "The upload stopped. Tap Seal again: it carries on where it stopped.": "L'envoi s'est arrêté. Touchez « Sceller » à nouveau : il reprend où il s'était arrêté.",
+  "Uploading {i} of {n} · {p}%": "Envoi {i} sur {n} · {p} %",
+  "Uploaded": "Envoyé",
 };
