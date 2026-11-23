@@ -1107,7 +1107,7 @@ function videoPart(v) {
   const id = String(v && v.id || ""), date = String(v && v.date || ""), total = Number(v && v.total);
   const mime = String(v && v.mime || "video/mp4").split(";")[0];
   if (!/^p[a-z0-9]{4,24}$/.test(id) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^video\//.test(mime)) throw new Error("Bad video");
-  if (!(total > 0) || total > 400 * 1024 * 1024) throw new Error("Video too large (400 MB max).");
+  if (!(total > 0) || total > 2048 * 1024 * 1024) throw new Error("Video too large (2 GB max).");
   const props = PropertiesService.getScriptProperties();
   const key = "VUP_" + id;
   const name = `${date} · ${id}.${/webm/.test(mime) ? "webm" : /quicktime/.test(mime) ? "mov" : "mp4"}`;

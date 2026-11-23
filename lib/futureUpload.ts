@@ -2,7 +2,7 @@ import { getPhoto, posterId, toBase64 } from "./photos";
 import { postToSheet } from "./sheetSync";
 import type { PhotoRef } from "./types";
 
-const CHUNK = 3 * 1024 * 1024;
+const CHUNK = 8 * 1024 * 1024;
 
 /** Upload one photo straight into the "Future me / Sealed" folder. Returns its Drive id. */
 async function sendPhoto(url: string, id: string, date: string): Promise<string> {
@@ -25,7 +25,7 @@ async function sendVideo(url: string, id: string, date: string, onPart: (f: numb
     if (!res.ok) {
       if (res.error === "offline" || misses >= 4) throw new Error(res.error || "upload");
       misses++;
-      chunk = chunk > 1024 * 1024 ? 1024 * 1024 : 512 * 1024;
+      chunk = chunk > 3 * 1024 * 1024 ? 3 * 1024 * 1024 : chunk > 1024 * 1024 ? 1024 * 1024 : 512 * 1024;
       res = await postToSheet(url, { video: base }, true);
       continue;
     }

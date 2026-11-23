@@ -35,7 +35,7 @@ async function ingest(files: FileList | null, date: string, room: number): Promi
     try {
       if (isVideoFile(f)) {
         out.push(await ingestVideo(f, date));
-        if (f.size > 40 * 1024 * 1024) toast(tr("Big video ({n} MB). It uploads in the background, piece by piece.", { n: mb(f.size) }));
+        if (f.size > 40 * 1024 * 1024) toast(tr("Big video ({n} MB). Keep Muhasaba open while it uploads: the screen stays on until it's done.", { n: mb(f.size) }));
         continue;
       }
       const { blob, w, h } = await compress(f);
@@ -44,7 +44,7 @@ async function ingest(files: FileList | null, date: string, room: number): Promi
       out.push({ id });
     } catch (e) {
       const m = e instanceof Error ? e.message : "";
-      toast(m === "bigvideo" ? tr("This video is over 300 MB. Trim it in your gallery first, or record it in Muhasaba.") : m || tr("Couldn't add that photo."));
+      toast(m === "bigvideo" ? tr("This video is over 1.5 GB. Trim it in your gallery first.") : m || tr("Couldn't add that photo."));
     }
   }
   return out;
@@ -193,10 +193,10 @@ function VideoRecorder({ date, onClose, onDone }: { date: string; onClose: () =>
     setState("saving");
     try {
       onDone(await ingestVideo(f, date));
-      if (f.size > 40 * 1024 * 1024) toast(tr("Big video ({n} MB). It uploads in the background, piece by piece.", { n: mb(f.size) }));
+      if (f.size > 40 * 1024 * 1024) toast(tr("Big video ({n} MB). Keep Muhasaba open while it uploads: the screen stays on until it's done.", { n: mb(f.size) }));
     } catch (e) {
       const m = e instanceof Error ? e.message : "";
-      setErr(m === "bigvideo" ? tr("This video is over 300 MB. Trim it in your gallery first, or record it in Muhasaba.") : m || tr("Couldn't save the video."));
+      setErr(m === "bigvideo" ? tr("This video is over 1.5 GB. Trim it in your gallery first.") : m || tr("Couldn't save the video."));
       setState("error");
     }
   };

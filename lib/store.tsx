@@ -12,7 +12,7 @@ import { fromBase64, getPhoto, posterId, putPhoto, toBase64 } from "./photos";
 import type { PhotoRef } from "./types";
 
 /** Video upload piece size: a multiple of 256 KB, as Google Drive requires. */
-const VIDEO_CHUNK = 3 * 1024 * 1024;
+const VIDEO_CHUNK = 8 * 1024 * 1024; // multiples of 256 KB, as Drive requires
 
 export type View = "today" | "journal" | "record";
 type PointerLike = { clientX?: number; clientY?: number } | null | undefined;
@@ -441,6 +441,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setPhotoUp((u) => ({ busy: null, progress: u.progress, failed: msg ? { ...u.failed, [id]: msg } : u.failed }));
     };
     photoBusy.current = true;
+    let wake: { release: () => Promise<void> } | null = null;
     setPhotoUp((u) => ({ ...u, busy: id }));
     try {
       if (ref.kind === "video" && !ref.poster) {
@@ -462,6 +463,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // 2. the video itself, in 3 MB pieces. The script remembers how far it got, so a dropped connection resumes.
       const total = rec.blob.size;
       const mime = rec.blob.type || "video/mp4";
+      // Keep the screen awake while a video uploads: a sleeping phone pauses the upload.
+      const nav = navigator as Navigator & { wakeLock?: { request: (t: "screen") => Promise<{ release: () => Promise<void> }> } };
+      wake = await nav.wakeLock?.request("screen").catch(() => null) ?? null;
       const base = { id, date, mime, total };
       let res = await postToSheet(sh.url, { video: base }, true);
       if (!res.ok && res.error === "unreachable") {
@@ -479,7 +483,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             return;
           }
           misses++;
-          chunk = Math.max(512 * 1024, chunk / 2 >= 1024 * 1024 ? 1024 * 1024 : 512 * 1024);
+          chunk = chunk > 3 * 1024 * 1024 ? 3 * 1024 * 1024 : chunk > 1024 * 1024 ? 1024 * 1024 : 512 * 1024;
           res = await postToSheet(sh.url, { video: base }, true); // ask how far it got, then carry on
           continue;
         }
@@ -494,6 +498,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       fail({ ok: false, error: "Upload stalled" });
     } finally {
       photoBusy.current = false;
+      void wake?.release().catch(() => undefined);
     }
   }, [patchDay]);
   useEffect(() => { if (hydrated) void uploadPhotos(); }, [hydrated, days, sheet.url, retryTick, uploadPhotos]);

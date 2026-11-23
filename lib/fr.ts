@@ -553,4 +553,6 @@ export const FR: Record<string, string> = {
   "The upload stopped. Tap Seal again: it carries on where it stopped.": "L'envoi s'est arrêté. Touchez « Sceller » à nouveau : il reprend où il s'était arrêté.",
   "Uploading {i} of {n} · {p}%": "Envoi {i} sur {n} · {p} %",
   "Uploaded": "Envoyé",
+  "This video is over 1.5 GB. Trim it in your gallery first.": "Cette vidéo dépasse 1,5 Go. Raccourcissez-la d'abord dans votre galerie.",
+  "Big video ({n} MB). Keep Muhasaba open while it uploads: the screen stays on until it's done.": "Grosse vidéo ({n} Mo). Gardez Muhasaba ouvert pendant l'envoi : l'écran reste allumé jusqu'à la fin.",
 };

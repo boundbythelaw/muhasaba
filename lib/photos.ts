@@ -119,8 +119,8 @@ export function usePhotoUrl(id: string) {
 
 /* ---------- videos ---------- */
 
-export const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
-export const MAX_REC_SECONDS = 180;
+export const MAX_VIDEO_BYTES = 1536 * 1024 * 1024; // 1.5 GB
+export const MAX_REC_SECONDS = 300; // 5 minutes (the recording is held in memory until saved)
 export const posterId = (id: string) => id + "t";
 export const fmtDur = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
@@ -141,7 +141,7 @@ export async function makePoster(video: Blob, knownDur?: number): Promise<{ post
   el.muted = true; el.playsInline = true; el.preload = "auto"; el.src = url;
   try {
     await new Promise<void>((res, rej) => {
-      const to = setTimeout(() => rej(new Error("This video can't be read on this phone.")), 15000);
+      const to = setTimeout(() => rej(new Error("This video can't be read on this phone.")), 30000);
       el.onloadeddata = () => { clearTimeout(to); res(); };
       el.onerror = () => { clearTimeout(to); rej(new Error("This video can't be read on this phone.")); };
     });
@@ -186,10 +186,29 @@ export async function makePoster(video: Blob, knownDur?: number): Promise<{ post
   }
 }
 
+/** A simple dark cover with a play button, for videos this phone can't preview. */
+async function plainPoster(dur?: number): Promise<{ poster: Blob; dur: number; w: number; h: number }> {
+  const w = 1280, h = 720;
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d")!;
+  const grd = g.createLinearGradient(0, 0, w, h);
+  grd.addColorStop(0, "#1B1F4B"); grd.addColorStop(1, "#3B2A8C");
+  g.fillStyle = grd; g.fillRect(0, 0, w, h);
+  const r = 94;
+  g.beginPath(); g.arc(w / 2, h / 2, r, 0, Math.PI * 2); g.fillStyle = "rgba(255,255,255,0.92)"; g.fill();
+  g.beginPath(); g.moveTo(w / 2 - r * 0.32, h / 2 - r * 0.45); g.lineTo(w / 2 - r * 0.32, h / 2 + r * 0.45); g.lineTo(w / 2 + r * 0.5, h / 2); g.closePath();
+  g.fillStyle = "#5A3FD6"; g.fill();
+  const poster = await new Promise<Blob>((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error("Couldn't make the video cover."))), "image/jpeg", 0.85));
+  return { poster, dur: dur ?? 0, w, h };
+}
+
 /** Save a video and its cover on the phone; returns the entry reference. */
 export async function ingestVideo(file: Blob, date: string, knownDur?: number) {
   if (file.size > MAX_VIDEO_BYTES) throw new Error("bigvideo");
-  const { poster, dur, w, h } = await makePoster(file, knownDur);
+  // Some formats (e.g. HEVC from another phone) can't be previewed here: the video is still kept and
+  // uploaded as it is, with a plain cover instead of a frame from it.
+  const { poster, dur, w, h } = await makePoster(file, knownDur).catch(() => plainPoster(knownDur));
   const id = newPhotoId();
   await putPhoto({ id: posterId(id), date, blob: poster, w, h, added: Date.now() });
   await putPhoto({ id, date, blob: file, w, h, added: Date.now() });
