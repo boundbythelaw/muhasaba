@@ -804,7 +804,11 @@ function longKey(k, fr) {
 function tabTitle(date, verdict, title) {
   const v = verdict && VERDICT[verdict] ? VERDICT[verdict].dot + " " : "";
   const t = `${v}${dayLabel(date, appCtx().fr)}${title ? " · " + title : ""}`;
-  return t.length > 60 ? t.slice(0, 59) + "…" : t;
+  // Google caps tab names at 50 characters (an emoji counts as two).
+  if (t.length <= 50) return t;
+  let out = "";
+  for (const ch of Array.from(t)) { if ((out + ch).length > 49) break; out += ch; }
+  return out + "…";
 }
 
 function monthReg(ym) {
@@ -883,7 +887,8 @@ function refreshCover(ym) {
   const st = (o) => { const x = {}; Object.keys(o).forEach((k) => (x[A[k]] = o[k])); return x; };
   const dates = Object.keys(reg.tabs).sort();
   const first = body.getParagraphs()[0];
-  first.setText(monthLabel(ym, fr)).setHeading(DocumentApp.ParagraphHeading.TITLE);
+  first.setText(monthLabel(ym, fr));
+  first.setHeading(DocumentApp.ParagraphHeading.TITLE);
   first.setAttributes(st({ FONT_FAMILY: "Poppins", FONT_SIZE: 28, BOLD: true, FOREGROUND_COLOR: C.night }));
   const counts = { good: 0, hard_good: 0, hard: 0 };
   const scores = [];
@@ -915,6 +920,12 @@ function refreshCover(ym) {
     }
   });
   doc.saveAndClose();
+}
+
+/** Rebuilds the contents page of every month Doc. */
+function refreshAllCovers() {
+  Object.keys(PropertiesService.getScriptProperties().getProperties()).filter((k) => /^JM_\d{4}-\d{2}$/.test(k))
+    .forEach((k) => { try { refreshCover(k.slice(3)); } catch (e) { console.warn("Cover", k, e); } });
 }
 
 /** Copies a whole Doc body (text, tables, photos) into another body. */
@@ -971,6 +982,7 @@ function organiseJournal(auto) {
     } catch (err) { console.error("Organise", date, err); left++; }
   });
   Object.keys(months).forEach((ym) => { try { refreshCover(ym); } catch (e) { console.warn("Cover", e); } });
+  console.log(`Organise: ${moved} moved, ${left} left`);
   if (left) p.setProperty("ORGANISE_LEFT", String(left)); else p.deleteProperty("ORGANISE_LEFT");
   return { ok: true, moved: moved, left: left };
 }
@@ -2392,7 +2404,8 @@ function futureDoc(r, today) {
   const dots = () => line("·   ·   ·", { FONT_SIZE: 14, FOREGROUND_COLOR: GOLD }).setAlignment(CENTER).setSpacingBefore(14).setSpacingAfter(14);
 
   const seal = body.getParagraphs()[0];
-  seal.setText("✉").setAttributes(st({ FONT_SIZE: 34, FOREGROUND_COLOR: GOLD })).setAlignment(CENTER).setSpacingAfter(4);
+  seal.setText("✉");
+  seal.setAttributes(st({ FONT_SIZE: 34, FOREGROUND_COLOR: GOLD })).setAlignment(CENTER).setSpacingAfter(4);
   line(`${T("SEALED ON", "SCELLÉE LE")} ${longKey(r.written, fr).toUpperCase()}${r.hijri ? "  ·  " + r.hijri.toUpperCase() : ""}`, { FONT_SIZE: 8.5, BOLD: true, FOREGROUND_COLOR: GOLD })
     .setAlignment(CENTER).setSpacingAfter(10);
   const title = body.appendParagraph(T(`A letter from ${span} ago`, `Une lettre d'il y a ${span}`));
