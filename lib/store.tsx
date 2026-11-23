@@ -12,7 +12,7 @@ import { fromBase64, getPhoto, posterId, putPhoto, toBase64 } from "./photos";
 import type { PhotoRef } from "./types";
 
 /** Video upload piece size: a multiple of 256 KB, as Google Drive requires. */
-const VIDEO_CHUNK = 8 * 1024 * 1024; // multiples of 256 KB, as Drive requires
+const VIDEO_CHUNK = 4 * 1024 * 1024; // multiples of 256 KB, as Drive requires
 
 export type View = "today" | "journal" | "record";
 type PointerLike = { clientX?: number; clientY?: number } | null | undefined;

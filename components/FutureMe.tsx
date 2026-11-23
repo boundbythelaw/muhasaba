@@ -189,11 +189,13 @@ function Composer({ open, onClose, onSealed }: { open: boolean; onClose: () => v
       }
     } catch (e) {
       setBusy(false); setUp(null);
-      const m = e instanceof Error ? e.message : "";
-      setErr(m === "offline" ? tr("You're offline. Your letter is kept here as a draft: seal it when you're back online.")
+      const [m, step] = (e instanceof Error ? e.message : "").split("|");
+      const detail = step ? ` (${tr("failed at")}: ${step}${m && !["offline", "unreachable", "script", "missing", "upload"].includes(m) ? " · " + m : ""})` : "";
+      setErr((m === "offline" ? tr("You're offline. Your letter is kept here as a draft: seal it when you're back online.")
         : m === "missing" ? tr("One photo or video isn't on this phone any more. Remove it and add it again.")
-        : m === "unreachable" || m === "script" ? tr("Your Apps Script didn't take the file. Paste the newest Code.gs and publish a new version (Déployer → Gérer les déploiements → ✏️ → Nouvelle version).")
-        : tr("The upload stopped. Tap Seal again: it carries on where it stopped."));
+        : m === "unreachable" ? tr("Google didn't answer with a proper reply (often a time-out or an error page). Tap Seal again: it carries on where it stopped.")
+        : m === "script" ? tr("Your Apps Script didn't take the file. Paste the newest Code.gs and publish a new version (Déployer → Gérer les déploiements → ✏️ → Nouvelle version).")
+        : tr("The upload stopped. Tap Seal again: it carries on where it stopped.")) + detail);
       return;
     }
     setUp(null);

@@ -555,4 +555,6 @@ export const FR: Record<string, string> = {
   "Uploaded": "Envoyé",
   "This video is over 1.5 GB. Trim it in your gallery first.": "Cette vidéo dépasse 1,5 Go. Raccourcissez-la d'abord dans votre galerie.",
   "Big video ({n} MB). Keep Muhasaba open while it uploads: the screen stays on until it's done.": "Grosse vidéo ({n} Mo). Gardez Muhasaba ouvert pendant l'envoi : l'écran reste allumé jusqu'à la fin.",
+  "failed at": "échec à",
+  "Google didn't answer with a proper reply (often a time-out or an error page). Tap Seal again: it carries on where it stopped.": "Google n'a pas renvoyé de vraie réponse (souvent un délai dépassé ou une page d'erreur). Touchez « Sceller » à nouveau : l'envoi reprend où il s'était arrêté.",
 };
