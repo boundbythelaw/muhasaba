@@ -52,6 +52,7 @@ const COLUMNS = [
   ["Portion", "portion", 82],
   ["Minutes", "minutes", 70],
   ["Difficulty", "difficulty", 84],
+  ["Page feel", "pageFeel", 170],
   ["Music day before", "music", 90],
   ["Preview", "preview", 66],
   ["1 juz", "juz", 56],
@@ -84,7 +85,7 @@ const COLUMNS = [
   ["Last update", "updated", 140],
 ];
 /** Bumped whenever COLUMNS change. The app re-sends every day when it sees a new number. */
-const SCHEMA = 5;
+const SCHEMA = 6;
 
 /**
  * Major updates, newest first (same list as the app's "What's new"). Written to the Updates tab so you can

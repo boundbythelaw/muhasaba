@@ -1,3 +1,4 @@
+import type { Difficulty } from "./types";
 import { MAX, MUSHAF_PAGES, PRAYERS, reasonOf, STEP_GOAL } from "./constants";
 import { latePoints, RULES } from "./rules";
 import { tr } from "./i18n";
@@ -148,3 +149,15 @@ export function juzFill(j: number, done: number) {
   const [a, b] = juzRange(j);
   return Math.max(0, Math.min(1, (done - a + 1) / (b - a + 1)));
 }
+
+const DIFF_N = { easy: 1, normal: 2, hard: 3 } as const;
+/** The day's overall difficulty from the per-page ones: the rounded average (no rated page → null). */
+export function overallDiff(diffs: (Difficulty | null)[] | undefined): Difficulty | null {
+  const xs = (diffs ?? []).filter((x): x is Difficulty => !!x).map((x) => DIFF_N[x]);
+  if (!xs.length) return null;
+  const a = Math.round(xs.reduce((p, c) => p + c, 0) / xs.length);
+  return a <= 1 ? "easy" : a >= 3 ? "hard" : "normal";
+}
+/** Per-page difficulties for a day; days from before per-page rating repeat the day's one answer. */
+export const pageDiffs = (q: { mem: number; diff: Difficulty | null; diffs?: (Difficulty | null)[] }) =>
+  Array.from({ length: q.mem }, (_, i) => (q.diffs ? q.diffs[i] ?? null : q.diff));

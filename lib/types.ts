@@ -8,7 +8,10 @@ export interface QuranLog {
   /** Pages memorised that day (0, 1, 2, or more). */
   mem: number;
   minutes: number | null;
+  /** Overall feel of the day's ḥifẓ (kept in step with `diffs`, so old stats keep working). */
   diff: Difficulty | null;
+  /** How each page felt, in order: [first page, second page, …]. */
+  diffs?: (Difficulty | null)[];
   preview: boolean;
   /** Murājaʿa done: today's juz read (+5). */
   juz: boolean;

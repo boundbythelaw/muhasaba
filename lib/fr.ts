@@ -557,4 +557,13 @@ export const FR: Record<string, string> = {
   "Big video ({n} MB). Keep Muhasaba open while it uploads: the screen stays on until it's done.": "Grosse vidéo ({n} Mo). Gardez Muhasaba ouvert pendant l'envoi : l'écran reste allumé jusqu'à la fin.",
   "failed at": "échec à",
   "Google didn't answer with a proper reply (often a time-out or an error page). Tap Seal again: it carries on where it stopped.": "Google n'a pas renvoyé de vraie réponse (souvent un délai dépassé ou une page d'erreur). Touchez « Sceller » à nouveau : l'envoi reprend où il s'était arrêté.",
+  "How did the page feel?": "Comment était la page ?",
+  "How did each page feel?": "Comment était chaque page ?",
+  "How was the page?": "Comment était la page ?",
+  "How was each page?": "Comment était chaque page ?",
+  "Rate every page on its own: your Insights will show which kind of pages take you longer.": "Notez chaque page séparément : vos statistiques montreront quel genre de page vous prend plus de temps.",
+  "Pages": "Pages",
+  "Hard pages": "Pages difficiles",
+  "{n} of your last {m} pages felt hard.": "{n} de vos {m} dernières pages étaient difficiles.",
+  "Pages by feel": "Pages par ressenti",
 };

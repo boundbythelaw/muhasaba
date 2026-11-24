@@ -56,6 +56,8 @@ export function buildRow(date: string, days: Record<string, DayLog>, prefs: Pref
     portion: `${po.from}–${po.to}`,
     minutes: d.quran.minutes,
     difficulty: d.quran.diff ? DIFF_LABEL[d.quran.diff] : null,
+    // Per page, e.g. "p140 Easy · p141 Hard" (only when rated page by page).
+    pageFeel: d.quran.diffs?.some(Boolean) ? d.quran.diffs.slice(0, d.quran.mem).map((x, i) => `p${po.from + i} ${x ? DIFF_LABEL[x] : "–"}`).join(" · ") : null,
     preview: d.quran.preview,
     juz: d.quran.juz,
     mulkSubh: d.quran.mulkSubh,

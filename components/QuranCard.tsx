@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { MUSHAF_PAGES } from "@/lib/constants";
 import { addDays, parseKey, todayKey } from "@/lib/dates";
 import { haptic, toast } from "@/lib/fx";
-import { juzFill, juzOf, juzRange, pagesBefore, portion } from "@/lib/scoring";
+import { juzFill, juzOf, juzRange, overallDiff, pageDiffs, pagesBefore, portion } from "@/lib/scoring";
 import { useStore } from "@/lib/store";
 import type { Difficulty, QuranLog } from "@/lib/types";
 import TimerBar from "./TimerBar";
@@ -28,14 +28,27 @@ export default function QuranCard() {
   const toggle = (f: keyof Pick<QuranLog, "preview" | "juz" | "mulkSubh" | "mulkMaghrib">) => (e: React.MouseEvent) =>
     update((d) => { d.quran[f] = !d.quran[f]; }, e);
 
-  // After the first pages of the day are logged: did you listen to music yesterday? (for the Insights)
-  const [musicAsk, setMusicAsk] = useState(false);
+  // After pages are logged today: how did each new page feel, and (first time) music the day before?
+  const [ask, setAsk] = useState<null | "music" | "pages">(null);
   const prevMem = useRef(q.mem);
   useEffect(() => {
-    if (prevMem.current === 0 && q.mem > 0 && q.music == null && cur === todayKey()) setTimeout(() => setMusicAsk(true), 700);
+    const grew = q.mem > prevMem.current;
     prevMem.current = q.mem;
-  }, [q.mem, q.music, cur]);
+    if (!grew || cur !== todayKey()) return;
+    const unrated = pageDiffs(q).some((x) => !x);
+    if (q.music == null) setTimeout(() => setAsk("music"), 700);
+    else if (unrated) setTimeout(() => setAsk("pages"), 700);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.mem, cur]);
   const setMusic = (v: 0 | 1 | 2) => update((d) => { d.quran.music = v; }, null, true, { noConfirm: true });
+  const setPageDiff = (i: number, v: Difficulty) => update((d) => {
+    const cur2 = pageDiffs(d.quran);
+    cur2[i] = cur2[i] === v ? null : v;
+    d.quran.diffs = cur2;
+    d.quran.diff = overallDiff(cur2);
+  }, null, true, { noConfirm: true });
+  const pages = Array.from({ length: q.mem }, (_, i) => po.from + i);
+  const feel = pageDiffs(q);
 
   return (
     <CardShell id="sec-q" title={tr("Qur'an")} ar="القرآن" value={scores.q} max={30} done={scores.q >= 30} summary={tr("Pages {a}–{b} memorised, juz read, Al-Mulk twice", { a: po.from, b: po.to })}>
@@ -93,10 +106,10 @@ export default function QuranCard() {
               ))}
               <MinutesInput value={q.minutes} onCommit={(n) => update((d) => { d.quran.minutes = n; }, null, true)} />
             </div>
-            <div className="lab">{tr("How did it feel?")}</div>
-            <Segmented<Difficulty> ariaLabel={tr("Difficulty")} value={q.diff}
-              options={[{ value: "easy", label: "Easy", sub: "Smooth" }, { value: "normal", label: "Normal", sub: "Steady" }, { value: "hard", label: "Hard", sub: "Fought for it" }]}
-              onSelect={(v) => { haptic(8); update((d) => { d.quran.diff = d.quran.diff === v ? null : v; }, null, true); }} />
+            {q.mem > 0 && <>
+              <div className="lab">{q.mem === 1 ? tr("How did the page feel?") : tr("How did each page feel?")}</div>
+              <PageFeel pages={pages} feel={feel} onPick={(i, v) => { haptic(8); void setPageDiff(i, v); }} />
+            </>}
           </motion.div>
         )}
       </AnimatePresence>
@@ -112,17 +125,33 @@ export default function QuranCard() {
       </div>
 
       {q.mem > 0 && (
-        <button className="musicrow" onClick={() => setMusicAsk(true)}>
+        <button className="musicrow" onClick={() => setAsk("music")}>
           🎧 {tr("Music the day before")}: <b>{q.music == null ? tr("not answered") : tr(["None", "A little", "Yes"][q.music])}</b>
         </button>
       )}
-      <BottomSheet open={musicAsk} onClose={() => setMusicAsk(false)} label={tr("Music")}>
+      <BottomSheet open={ask === "pages"} onClose={() => setAsk(null)} label={tr("Pages")}>
+        <div className="sheet-body">
+          <h3>{q.mem === 1 ? tr("How was the page?") : tr("How was each page?")}</h3>
+          <p className="sheet-msg">{tr("Rate every page on its own: your Insights will show which kind of pages take you longer.")}</p>
+          <PageFeel pages={pages} feel={feel} big onPick={(i, v) => {
+            haptic(8);
+            void setPageDiff(i, v).then(() => {
+              const next = pageDiffs({ ...q, diffs: feel.map((x, k) => (k === i ? v : x)) });
+              if (next.every(Boolean)) setTimeout(() => setAsk(null), 350);
+            });
+          }} />
+          <div className="sheet-foot">
+            <motion.button className="btn big" {...tap} onClick={() => setAsk(null)}>{tr("Done")}</motion.button>
+          </div>
+        </div>
+      </BottomSheet>
+      <BottomSheet open={ask === "music"} onClose={() => setAsk(null)} label={tr("Music")}>
         <div className="sheet-body">
           <h3>{tr("Did you listen to music yesterday?")}</h3>
           <p className="sheet-msg">{tr("Your Insights will compare how long a page takes after days with and without music.")}</p>
           <div className="musicopts">
             {([[0, "🚫", "None"], [1, "🎵", "A little"], [2, "🎧", "Yes"]] as const).map(([v, ic, l]) => (
-              <motion.button key={v} {...tap} className={`focusopt ${q.music === v ? "on" : ""}`} onClick={() => { void setMusic(v).then(() => { haptic(10); setMusicAsk(false); if (v === 0) toast(tr("Al-ḥamdu lillāh. Keep guarding your heart for the Qur'an.")); }); }}>
+              <motion.button key={v} {...tap} className={`focusopt ${q.music === v ? "on" : ""}`} onClick={() => { void setMusic(v).then(() => { haptic(10); setAsk(pageDiffs(q).some((x) => !x) ? "pages" : null); if (v === 0) toast(tr("Al-ḥamdu lillāh. Keep guarding your heart for the Qur'an.")); }); }}>
                 <span>{ic}</span><b>{tr(l)}</b>
               </motion.button>
             ))}
@@ -277,5 +306,26 @@ function MinutesInput({ value, onCommit }: { value: number | null; onCommit: (n:
   return (
     <input className="inp" type="number" inputMode="numeric" min={0} placeholder={tr("min")} aria-label={tr("Minutes")} value={v}
       onChange={(e) => setV(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+  );
+}
+
+const FEEL: { value: Difficulty; label: string; sub: string }[] = [
+  { value: "easy", label: "Easy", sub: "Smooth" },
+  { value: "normal", label: "Normal", sub: "Steady" },
+  { value: "hard", label: "Hard", sub: "Fought for it" },
+];
+
+/** One row per page memorised today, each with its own Easy / Normal / Hard. */
+function PageFeel({ pages, feel, onPick, big }: { pages: number[]; feel: (Difficulty | null)[]; onPick: (i: number, v: Difficulty) => void; big?: boolean }) {
+  return (
+    <div className={`pagefeel ${big ? "big" : ""}`}>
+      {pages.map((p, i) => (
+        <div className="pf-row" key={p}>
+          <span className="pf-page num">{tr("Page {p}", { p })}</span>
+          <Segmented<Difficulty> ariaLabel={tr("Page {p}", { p })} value={feel[i]}
+            options={big ? FEEL : FEEL.map((f) => ({ value: f.value, label: f.label }))} onSelect={(v) => onPick(i, v)} />
+        </div>
+      ))}
+    </div>
   );
 }

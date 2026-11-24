@@ -100,6 +100,10 @@ export default function InsightsCard() {
           <>
             <div className="istat"><b className="num">{Math.round(I.perPage)}</b><span>{tr("minutes per page on average")}</span></div>
             <Bars max={Math.max(...I.byDiff.map((d) => d.avg ?? 0), 1)} items={I.byDiff.map((d) => ({ label: tr(d.diff === "easy" ? "Easy" : d.diff === "normal" ? "Normal" : "Hard"), v: d.avg }))} />
+            {I.pageFeel.some((p) => p.n) && <>
+              <div className="lab">{tr("Pages by feel")}</div>
+              <Bars max={Math.max(...I.pageFeel.map((p) => p.n), 1)} items={I.pageFeel.map((p) => ({ label: tr(p.diff === "easy" ? "Easy" : p.diff === "normal" ? "Normal" : "Hard"), v: p.n, hi: false, lo: p.diff === "hard" }))} />
+            </>}
             <div className="lab">{tr("Minutes per page, by music the day before")}</div>
             {I.byMusic.filter((m) => m.n).length < 2
               ? <p className="note">{tr("Answer the music question after memorising. Once there are days with and without music, the comparison shows here.")}</p>

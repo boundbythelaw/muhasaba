@@ -1,6 +1,6 @@
 import { PRAYERS, REASONS } from "./constants";
 import { addDays, parseKey } from "./dates";
-import { checkinDone, excused, scoreDay, sleepHours } from "./scoring";
+import { checkinDone, excused, pageDiffs, scoreDay, sleepHours } from "./scoring";
 import type { DayLog } from "./types";
 
 /** A day counts once something was logged in it. */
@@ -60,6 +60,9 @@ export function computeInsights(days: Record<string, DayLog>) {
   const perPage = avg(hifz.map((r) => r.d.quran.minutes! / r.d.quran.mem));
   const byDiff = (["easy", "normal", "hard"] as const).map((df) => ({ diff: df, avg: avg(hifz.filter((r) => r.d.quran.diff === df).map((r) => r.d.quran.minutes! / r.d.quran.mem)) }));
 
+  // Every page rated on its own (days before per-page rating count each page with the day's answer).
+  const feelAll = rows.flatMap((r) => pageDiffs(r.d.quran)).filter(Boolean);
+  const pageFeel = (["easy", "normal", "hard"] as const).map((df) => ({ diff: df, n: feelAll.filter((x) => x === df).length }));
   const mp = (xs: typeof hifz) => avg(xs.map((r) => r.d.quran.minutes! / r.d.quran.mem));
   const byMusic = [
     { label: "No music", avg: mp(hifz.filter((r) => r.d.quran.music === 0)), n: hifz.filter((r) => r.d.quran.music === 0).length },
@@ -97,5 +100,5 @@ export function computeInsights(days: Record<string, DayLog>) {
   };
 
   return { n: rows.length, avg: avg(rows.map((r) => r.s.total)), weekday, bestWd: ranked[0] ?? null, worstWd: ranked.length > 1 ? ranked[ranked.length - 1] : null,
-    best, worst, rebound, prayers, hardest, reasons, perPage, byDiff, byMusic, checkins: ck.length, sleep, bedtime, phone, slip };
+    best, worst, rebound, prayers, hardest, reasons, perPage, byDiff, pageFeel, byMusic, checkins: ck.length, sleep, bedtime, phone, slip };
 }

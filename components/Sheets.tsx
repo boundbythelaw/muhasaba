@@ -127,8 +127,10 @@ export function StepsSheet({ open, onClose, value, onSave }: { open: boolean; on
         <h3>{tr("Steps today")}</h3>
         <div className="stepsedit">
           <motion.button className="sb" onClick={() => bump(-500)} aria-label={tr("500 fewer")} {...tap}>−</motion.button>
-          <input className="stepsinput num" type="number" inputMode="numeric" min={0} step={100} value={n || ""} placeholder="0"
-            onChange={(e) => setN(Math.max(0, Math.min(100000, parseInt(e.target.value, 10) || 0)))} aria-label={tr("Steps")} />
+          {/* Text (not number) input so the whole value can be selected: tapping it selects 8000, typing 9300 replaces it. */}
+          <input className="stepsinput num" type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" value={n ? String(n) : ""} placeholder="0"
+            onFocus={(e) => { const t = e.currentTarget; setTimeout(() => t.select(), 0); }}
+            onChange={(e) => setN(Math.max(0, Math.min(100000, parseInt(e.target.value.replace(/\D/g, ""), 10) || 0)))} aria-label={tr("Steps")} />
           <motion.button className="sb" onClick={() => bump(500)} aria-label={tr("500 more")} {...tap}>+</motion.button>
         </div>
         <p className={`sheet-msg center ${n >= STEP_GOAL ? "ok" : ""}`}>{n >= STEP_GOAL ? tr("Minimum met ✓") : tr("{n} to reach 8,000", { n: num(STEP_GOAL - n) })}</p>
