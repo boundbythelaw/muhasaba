@@ -19,7 +19,9 @@ export default function WalkCard() {
 
   const save = async (n: number | null, pt?: { clientX: number; clientY: number }) => {
     const before = day.steps ?? 0;
-    const ok = await update((d) => { d.steps = n && n > 0 ? Math.min(100000, n) : null; }, pt ?? null);
+    // Steps go up through the day, so changing them never asks "Change what you logged?". (That question
+    // also used to be dismissed instantly when it opened as the steps popup closed, so Save did nothing.)
+    const ok = await update((d) => { d.steps = n && n > 0 ? Math.min(100000, n) : null; }, pt ?? null, false, { noConfirm: true });
     if (ok && before < STEP_GOAL && (n ?? 0) >= STEP_GOAL) {
       const r = document.getElementById("steps-meter")?.getBoundingClientRect();
       burst(r ? r.right - 20 : innerWidth / 2, r ? r.top + 10 : innerHeight / 2);

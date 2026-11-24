@@ -88,20 +88,38 @@ export function ask(opts: AskOpts): Promise<boolean> {
  * While something full-screen is open, the phone's Back gesture closes it instead of leaving the app.
  * Mount it only while open (or pass `open`).
  */
+// history.back() finishes a moment later. Until it has, a newly opened overlay must wait, or that late
+// "back" would close it straight away (e.g. a confirm opened as a sheet closes).
+let pendingBack: Promise<void> | null = null;
+function goBack() {
+  pendingBack = new Promise<void>((res) => {
+    const done = () => { removeEventListener("popstate", done); clearTimeout(t); pendingBack = null; res(); };
+    const t = setTimeout(done, 400);
+    addEventListener("popstate", done);
+  });
+  history.back();
+}
+
 export function useBackClose(open: boolean, onClose: () => void) {
   const ref = useRef(onClose);
   ref.current = onClose;
   useEffect(() => {
     if (!open || typeof window === "undefined") return;
     const tag = "muhasaba-" + Math.random().toString(36).slice(2);
-    history.pushState({ overlay: tag }, "");
-    let popped = false;
+    let popped = false, live = true, pushed = false;
     // A pop that lands back on our own entry came from a sheet opened on top of us closing: ignore it.
     const pop = () => { if (history.state?.overlay === tag) return; popped = true; ref.current(); };
-    addEventListener("popstate", pop);
+    const start = () => {
+      if (!live) return;
+      history.pushState({ overlay: tag }, "");
+      pushed = true;
+      addEventListener("popstate", pop);
+    };
+    if (pendingBack) void pendingBack.then(start); else start();
     return () => {
+      live = false;
       removeEventListener("popstate", pop);
-      if (!popped && history.state?.overlay === tag) history.back();
+      if (pushed && !popped && history.state?.overlay === tag) goBack();
     };
   }, [open]);
 }
